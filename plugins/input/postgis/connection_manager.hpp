@@ -32,6 +32,9 @@
 // boost
 #include <memory>
 #include <boost/optional.hpp>
+#ifdef MAPNIK_THREADSAFE
+#include <boost/thread.hpp>
+#endif
 
 // stl
 #include <string>
@@ -110,13 +113,16 @@ private:
     using ContType = std::map<std::string,std::shared_ptr<PoolType> >;
     using HolderType = std::shared_ptr<Connection>;
     ContType pools_;
+#ifdef MAPNIK_THREADSAFE
+    boost::shared_mutex pools_access;
+#endif
 
 public:
 
     bool registerPool(ConnectionCreator<Connection> const& creator,unsigned initialSize,unsigned maxSize)
     {
 #ifdef MAPNIK_THREADSAFE
-        std::lock_guard<std::mutex> lock(mutex_);
+        boost::upgrade_lock<boost::shared_mutex> lock(pools_access);
 #endif
         ContType::const_iterator itr = pools_.find(creator.id());
 
@@ -127,6 +133,9 @@ public:
         }
         else
         {
+#ifdef MAPNIK_THREADSAFE
+            boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock(pools_access);
+#endif
             return pools_.insert(
                 std::make_pair(creator.id(),
                                std::make_shared<PoolType>(creator,initialSize,maxSize))).second;
@@ -137,6 +146,9 @@ public:
 
     std::shared_ptr<PoolType> getPool(std::string const& key)
     {
+#ifdef MAPNIK_THREADSAFE
+        boost::shared_lock<boost::shared_mutex> lock(pools_access);
+#endif
         ContType::const_iterator itr=pools_.find(key);
         if (itr!=pools_.end())
         {
