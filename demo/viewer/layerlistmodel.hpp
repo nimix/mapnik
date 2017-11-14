@@ -1,6 +1,6 @@
 /* This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * Mapnik is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,10 +14,9 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-//$Id$
 
 
 #ifndef LAYER_LIST_MODEL_HPP
@@ -35,7 +34,7 @@ class LayerListModel : public QAbstractListModel
 {
    Q_OBJECT
    public:
-      LayerListModel(boost::shared_ptr<mapnik::Map> map, QObject * parent = 0);
+      LayerListModel(std::shared_ptr<mapnik::Map> map, QObject * parent = 0);
       int rowCount(const QModelIndex &parent = QModelIndex()) const;
       QVariant data(const QModelIndex &index, int role) const;
       QVariant headerData(int section, Qt::Orientation orientation,
@@ -46,7 +45,7 @@ class LayerListModel : public QAbstractListModel
       boost::optional<mapnik::layer&> map_layer(int i);
 
    private:
-      boost::shared_ptr<mapnik::Map> map_;
+      std::shared_ptr<mapnik::Map> map_;
 };
 
 #endif //LAYER_LIST_MODEL_HPP

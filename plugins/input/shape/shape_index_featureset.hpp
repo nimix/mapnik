@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,9 +29,12 @@
 
 // mapnik
 #include <mapnik/geom_util.hpp>
+#include <mapnik/feature.hpp>
+#include <mapnik/unicode.hpp>
+#include <mapnik/value/types.hpp>
 
 // boost
-#include <boost/scoped_ptr.hpp>
+
 #include <boost/utility.hpp>
 
 #include "shape_datasource.hpp"
@@ -42,12 +45,29 @@ using mapnik::box2d;
 using mapnik::feature_ptr;
 using mapnik::context_ptr;
 
+namespace mapnik { namespace detail
+{
+struct node
+{
+    node() = default;
+    node(std::uint64_t offset_, std::int32_t start_, std::int32_t end_, box2d<float> && box_)
+        : offset(offset_),
+          start(start_),
+          end(end_),
+          box(std::move(box_)) {}
+    std::uint64_t offset;
+    std::int32_t start;
+    std::int32_t end;
+    mapnik::box2d<float> box;
+};
+}} // ns
+
 template <typename filterT>
 class shape_index_featureset : public Featureset
 {
 public:
     shape_index_featureset(filterT const& filter,
-                           shape_io & shape,
+                           std::unique_ptr<shape_io> && shape_ptr,
                            std::set<std::string> const& attribute_names,
                            std::string const& encoding,
                            std::string const& shape_name,
@@ -58,13 +78,14 @@ public:
 private:
     filterT filter_;
     context_ptr ctx_;
-    shape_io & shape_;
-    boost::scoped_ptr<transcoder> tr_;
-    std::vector<int> ids_;
-    std::vector<int>::iterator itr_;
+    std::unique_ptr<shape_io> shape_ptr_;
+    const std::unique_ptr<mapnik::transcoder> tr_;
+    std::vector<mapnik::detail::node> positions_;
+    std::vector<mapnik::detail::node>::iterator itr_;
     std::vector<int> attr_ids_;
-    const int row_limit_;
+    mapnik::value_integer row_limit_;
     mutable int count_;
+    mutable box2d<double> feature_bbox_;
 };
 
 #endif // SHAPE_INDEX_FEATURESET_HPP

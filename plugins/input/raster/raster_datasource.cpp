@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,12 +21,12 @@
  *****************************************************************************/
 
 // boost
-#include <boost/filesystem/operations.hpp>
-#include <boost/make_shared.hpp>
 
 // mapnik
+#include <mapnik/util/fs.hpp>
 #include <mapnik/debug.hpp>
-#include <mapnik/ctrans.hpp>
+#include <mapnik/view_transform.hpp>
+#include <mapnik/image_util.hpp>
 #include <mapnik/image_reader.hpp>
 #include <mapnik/boolean.hpp>
 
@@ -45,10 +45,10 @@ using mapnik::image_reader;
 
 DATASOURCE_PLUGIN(raster_datasource)
 
-raster_datasource::raster_datasource(const parameters& params, bool bind)
-    : datasource(params),
-      desc_(*params.get<std::string>("type"), "utf-8"),
-      extent_initialized_(false)
+raster_datasource::raster_datasource(parameters const& params)
+  : datasource(params),
+    desc_(raster_datasource::name(), "utf-8"),
+    extent_initialized_(false)
 {
     MAPNIK_LOG_DEBUG(raster) << "raster_datasource: Initializing...";
 
@@ -61,17 +61,19 @@ raster_datasource::raster_datasource(const parameters& params, bool bind)
     else
         filename_ = *file;
 
-    multi_tiles_ = *params_.get<bool>("multi", false);
-    tile_size_ = *params_.get<unsigned>("tile_size", 256);
-    tile_stride_ = *params_.get<unsigned>("tile_stride", 1);
+    multi_tiles_ = *params.get<mapnik::boolean_type>("multi", false);
+    tile_size_ = *params.get<mapnik::value_integer>("tile_size", 1024);
+    tile_stride_ = *params.get<mapnik::value_integer>("tile_stride", 1);
 
-    format_ = *params_.get<std::string>("format","tiff");
+    boost::optional<std::string> format_from_filename = mapnik::type_from_filename(*file);
+    format_ = *params.get<std::string>("format",format_from_filename?(*format_from_filename) : "tiff");
 
-    boost::optional<double> lox = params_.get<double>("lox");
-    boost::optional<double> loy = params_.get<double>("loy");
-    boost::optional<double> hix = params_.get<double>("hix");
-    boost::optional<double> hiy = params_.get<double>("hiy");
-    boost::optional<std::string> ext = params_.get<std::string>("extent");
+    boost::optional<mapnik::value_double> lox = params.get<mapnik::value_double>("lox");
+    boost::optional<mapnik::value_double> loy = params.get<mapnik::value_double>("loy");
+    boost::optional<mapnik::value_double> hix = params.get<mapnik::value_double>("hix");
+    boost::optional<mapnik::value_double> hiy = params.get<mapnik::value_double>("hiy");
+
+    boost::optional<std::string> ext = params.get<std::string>("extent");
 
     if (lox && loy && hix && hiy)
     {
@@ -82,26 +84,27 @@ raster_datasource::raster_datasource(const parameters& params, bool bind)
     {
         extent_initialized_ = extent_.from_string(*ext);
     }
+    else //bounding box from image_reader
+    {
+        std::unique_ptr<image_reader> reader(mapnik::get_image_reader(*file));
+        if (!reader) throw datasource_exception("Raster Plugin: failed to create reader for " + *file);
+        auto bbox = reader->bounding_box();
+        if (bbox)
+        {
+            extent_ = *bbox;
+            extent_initialized_ = true;
+        }
+    }
 
     if (! extent_initialized_)
     {
         throw datasource_exception("Raster Plugin: valid <extent> or <lox> <loy> <hix> <hiy> are required");
     }
 
-    if (bind)
-    {
-        this->bind();
-    }
-}
-
-void raster_datasource::bind() const
-{
-    if (is_bound_) return;
-
     if (multi_tiles_)
     {
-        boost::optional<unsigned> x_width = params_.get<unsigned>("x_width");
-        boost::optional<unsigned> y_width = params_.get<unsigned>("y_width");
+        boost::optional<mapnik::value_integer> x_width = params.get<mapnik::value_integer>("x_width");
+        boost::optional<mapnik::value_integer> y_width = params.get<mapnik::value_integer>("y_width");
 
         if (! x_width)
         {
@@ -118,14 +121,14 @@ void raster_datasource::bind() const
     }
     else
     {
-        if (! boost::filesystem::exists(filename_))
+        if (!mapnik::util::exists(filename_))
         {
             throw datasource_exception("Raster Plugin: " + filename_ + " does not exist");
         }
 
         try
         {
-            std::auto_ptr<image_reader> reader(mapnik::get_image_reader(filename_, format_));
+            std::unique_ptr<image_reader> reader(mapnik::get_image_reader(filename_, format_));
             if (reader.get())
             {
                 width_ = reader->width();
@@ -148,7 +151,6 @@ void raster_datasource::bind() const
 
     MAPNIK_LOG_DEBUG(raster) << "raster_datasource: Raster size=" << width_ << "," << height_;
 
-    is_bound_ = true;
 }
 
 raster_datasource::~raster_datasource()
@@ -170,9 +172,9 @@ mapnik::box2d<double> raster_datasource::envelope() const
     return extent_;
 }
 
-boost::optional<mapnik::datasource::geometry_t> raster_datasource::get_geometry_type() const
+boost::optional<mapnik::datasource_geometry_t> raster_datasource::get_geometry_type() const
 {
-    return boost::optional<mapnik::datasource::geometry_t>();
+    return boost::optional<mapnik::datasource_geometry_t>();
 }
 
 layer_descriptor raster_datasource::get_descriptor() const
@@ -182,9 +184,7 @@ layer_descriptor raster_datasource::get_descriptor() const
 
 featureset_ptr raster_datasource::features(query const& q) const
 {
-    if (! is_bound_) bind();
-
-    mapnik::CoordTransform t(width_, height_, extent_, 0, 0);
+    mapnik::view_transform t(width_, height_, extent_, 0, 0);
     mapnik::box2d<double> intersect = extent_.intersect(q.get_bbox());
     mapnik::box2d<double> ext = t.forward(intersect);
 
@@ -199,15 +199,15 @@ featureset_ptr raster_datasource::features(query const& q) const
 
         tiled_multi_file_policy policy(filename_, format_, tile_size_, extent_, q.get_bbox(), width_, height_, tile_stride_);
 
-        return boost::make_shared<raster_featureset<tiled_multi_file_policy> >(policy, extent_, q);
+        return std::make_shared<raster_featureset<tiled_multi_file_policy> >(policy, extent_, q);
     }
-    else if (width * height > 512*512)
+    else if (width * height > static_cast<int>(tile_size_ * tile_size_ << 2))
     {
         MAPNIK_LOG_DEBUG(raster) << "raster_datasource: Tiled policy";
 
-        tiled_file_policy policy(filename_, format_, 256, extent_, q.get_bbox(), width_, height_);
+        tiled_file_policy policy(filename_, format_, tile_size_, extent_, q.get_bbox(), width_, height_);
 
-        return boost::make_shared<raster_featureset<tiled_file_policy> >(policy, extent_, q);
+        return std::make_shared<raster_featureset<tiled_file_policy> >(policy, extent_, q);
     }
     else
     {
@@ -216,13 +216,13 @@ featureset_ptr raster_datasource::features(query const& q) const
         raster_info info(filename_, format_, extent_, width_, height_);
         single_file_policy policy(info);
 
-        return boost::make_shared<raster_featureset<single_file_policy> >(policy, extent_, q);
+        return std::make_shared<raster_featureset<single_file_policy> >(policy, extent_, q);
     }
 }
 
-featureset_ptr raster_datasource::features_at_point(coord2d const&) const
+featureset_ptr raster_datasource::features_at_point(coord2d const&, double tol) const
 {
     MAPNIK_LOG_WARN(raster) << "raster_datasource: feature_at_point not supported";
 
-    return featureset_ptr();
+    return mapnik::make_invalid_featureset();
 }

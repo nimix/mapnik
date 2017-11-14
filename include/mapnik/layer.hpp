@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,14 +24,20 @@
 #define MAPNIK_LAYER_HPP
 
 // mapnik
-#include <mapnik/feature.hpp>
-#include <mapnik/datasource.hpp>
+#include <mapnik/well_known_srs.hpp>
+#include <mapnik/geometry/box2d.hpp>
+#include <mapnik/image_compositing.hpp>
 
 // stl
 #include <vector>
+#include <memory>
 
 namespace mapnik
 {
+
+class datasource;
+using datasource_ptr = std::shared_ptr<datasource>;
+
 /*!
  * @brief A Mapnik map layer.
  *
@@ -43,9 +49,13 @@ namespace mapnik
 class MAPNIK_DECL layer
 {
 public:
-    explicit layer(std::string const& name, std::string const& srs="+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs");
+    layer(std::string const& name,
+          std::string const& srs=MAPNIK_LONGLAT_PROJ);
+    // copy
     layer(layer const& l);
-    layer& operator=(layer const& l);
+    // move
+    layer(layer && l);
+    layer& operator=(layer rhs);
     bool operator==(layer const& other) const;
 
     /*!
@@ -57,7 +67,7 @@ public:
      * @return the name of the layer.
      */
 
-    const std::string& name() const;
+    std::string const& name() const;
 
     /*!
      * @brief Set the SRS of the layer.
@@ -87,25 +97,37 @@ public:
      */
     std::vector<std::string>& styles();
 
-    /*!
-     * @param max_zoom The minimum zoom level to set
+    /*! \brief Add a child layer by copying it.
+     *  @param l The layer to add.
      */
-    void set_min_zoom(double min_zoom);
+    void add_layer(layer const& l);
+
+    /*! \brief Add a child layer by moving it.
+     *  @param l The layer to add.
+     */
+    void add_layer(layer && l);
+
+    std::vector<layer> const& layers() const;
 
     /*!
-     * @param max_zoom The maximum zoom level to set
+     * @param minimum_scale_denom The minimum scale denominator
      */
-    void set_max_zoom(double max_zoom);
+    void set_minimum_scale_denominator(double minimum_scale_denom);
+
+    /*!
+     * @param maximum_scale_denom The maximum scale denominator
+     */
+    void set_maximum_scale_denominator(double maximum_scale_denom);
 
     /*!
      * @return the minimum zoom level of the layer.
      */
-    double min_zoom() const;
+    double minimum_scale_denominator() const;
 
     /*!
      * @return the maximum zoom level of the layer.
      */
-    double max_zoom() const;
+    double maximum_scale_denominator() const;
 
     /*!
      * @brief Set whether this layer is active and will be rendered.
@@ -128,18 +150,18 @@ public:
     bool queryable() const;
 
     /*!
-     * @brief Get the visability for a specific scale.
+     * @brief Get the visibility for a specific scale denominator.
      *
-     * @param scale Accepts an integer or float input.
+     * @param scale_denom Accepts an integer or float input.
      *
-     * @return true if this layer's data is active and visible at a given scale.
+     * @return true if this layer's data is active and visible at a given scale denominator.
      *         Otherwise returns False.
-     * @return false if:
-     *         scale >= minzoom - 1e-6
+     *         false if:
+     *         scale_denominator >= minimum_scale_denominator - 1e-6
      *         or
-     *         scale < maxzoom + 1e-6
+     *         scale_denominator < maximum_scale_denominator + 1e-6
      */
-    bool visible(double scale) const;
+    bool visible(double scale_denom) const;
 
     /*!
      * @param clear_cache Set whether this layer's labels are cached.
@@ -152,7 +174,7 @@ public:
     bool clear_label_cache() const;
 
     /*!
-     * @param clear_cache Set whether this layer's features should be cached if used by multiple styles.
+     * @param cache_features Set whether this layer's features should be cached if used by multiple styles.
      */
     void set_cache_features(bool cache_features);
 
@@ -162,14 +184,14 @@ public:
     bool cache_features() const;
 
     /*!
-     * @param group_by Set the field rendering of this layer is grouped by.
+     * @param column Set the field rendering of this layer is grouped by.
      */
-    void set_group_by(std::string column);
+    void set_group_by(std::string const& column);
 
     /*!
      * @return The field rendering of this layer is grouped by.
      */
-    std::string group_by() const;
+    std::string const& group_by() const;
 
     /*!
      * @brief Attach a datasource for this layer.
@@ -188,22 +210,36 @@ public:
      */
     box2d<double> envelope() const;
 
+    // compositing
+    void set_comp_op(composite_mode_e comp_op);
+    boost::optional<composite_mode_e> comp_op() const;
+    void set_opacity(double opacity);
+    double get_opacity() const;
+
+    void set_maximum_extent(box2d<double> const& box);
+    boost::optional<box2d<double> > const&  maximum_extent() const;
+    void reset_maximum_extent();
+    void set_buffer_size(int size);
+    boost::optional<int> const& buffer_size() const;
+    void reset_buffer_size();
     ~layer();
 private:
-    void swap(const layer& other);
-
     std::string name_;
     std::string srs_;
-
-    double min_zoom_;
-    double max_zoom_;
+    double minimum_scale_denom_;
+    double maximum_scale_denom_;
     bool active_;
     bool queryable_;
     bool clear_label_cache_;
     bool cache_features_;
     std::string group_by_;
     std::vector<std::string> styles_;
+    std::vector<layer> layers_;
     datasource_ptr ds_;
+    boost::optional<int> buffer_size_;
+    boost::optional<box2d<double> > maximum_extent_;
+    boost::optional<composite_mode_e> comp_op_;
+    double opacity_;
 };
 }
 

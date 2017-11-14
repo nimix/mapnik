@@ -1,6 +1,6 @@
 # This file is part of Mapnik (c++ mapping toolkit)
 #
-# Copyright (C) 2009 Artem Pavlenko, Jean-Francois Doyon, Dane Springmeyer
+# Copyright (C) 2017 Artem Pavlenko
 #
 # Mapnik is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,6 +22,7 @@ import sys
 import re
 import platform
 from glob import glob
+from copy import copy
 from subprocess import Popen, PIPE
 from SCons.SConf import SetCacheMode
 import pickle
@@ -32,6 +33,20 @@ try:
 except:
     HAS_DISTUTILS = False
 
+LIBDIR_SCHEMA_DEFAULT='lib'
+severities = ['debug', 'warn', 'error', 'none']
+
+ICU_INCLUDES_DEFAULT='/usr/include'
+ICU_LIBS_DEFAULT='/usr/'
+
+DEFAULT_CC = "cc"
+DEFAULT_CXX = "c++"
+DEFAULT_CXX14_CXXFLAGS = " -std=c++14"
+DEFAULT_CXX14_LINKFLAGS = ""
+if sys.platform == 'darwin':
+    # homebrew default
+    ICU_INCLUDES_DEFAULT='/usr/local/opt/icu4c/include/'
+    ICU_LIBS_DEFAULT='/usr/local/opt/icu4c/'
 
 py3 = None
 
@@ -46,42 +61,48 @@ SCONS_CONFIGURE_CACHE = 'config.cache'
 SCONF_TEMP_DIR = '.sconf_temp'
 # auto-search directories for boost libs/headers
 BOOST_SEARCH_PREFIXES = ['/usr/local','/opt/local','/sw','/usr',]
-BOOST_MIN_VERSION = '1.47'
-CAIROMM_MIN_VERSION = '1.8.0'
+BOOST_MIN_VERSION = '1.61'
+#CAIRO_MIN_VERSION = '1.8.0'
+
+HARFBUZZ_MIN_VERSION = (0, 9, 34)
+HARFBUZZ_MIN_VERSION_STRING = "%s.%s.%s" % HARFBUZZ_MIN_VERSION
+
 
 DEFAULT_LINK_PRIORITY = ['internal','other','frameworks','user','system']
 
 
 pretty_dep_names = {
-    'ociei':'Oracle database library | configure with OCCI_LIBS & OCCI_INCLUDES | more info: http://trac.mapnik.org/wiki/OCCI',
-    'gdal':'GDAL C++ library | configured using gdal-config program | try setting GDAL_CONFIG SCons option | more info: http://trac.mapnik.org/wiki/GDAL',
-    'ogr':'OGR-enabled GDAL C++ Library | configured using gdal-config program | try setting GDAL_CONFIG SCons option | more info: http://trac.mapnik.org/wiki/OGR',
-    'geos_c':'GEOS Simple Geometry Specification C Library | configured with GEOS_LIB & GEOS_INCLUDE | more info: http://trac.mapnik.org/wiki/GEOS',
+    'clntsh':'Oracle database library | configure with OCCI_LIBS & OCCI_INCLUDES | more info: https://github.com/mapnik/mapnik/wiki/OCCI',
+    'gdal':'GDAL C++ library | configured using gdal-config program | try setting GDAL_CONFIG SCons option | more info: https://github.com/mapnik/mapnik/wiki/GDAL',
+    'ogr':'OGR-enabled GDAL C++ Library | configured using gdal-config program | try setting GDAL_CONFIG SCons option | more info: https://github.com/mapnik/mapnik/wiki/OGR',
     'cairo':'Cairo C library | configured using pkg-config | try setting PKG_CONFIG_PATH SCons option',
-    'cairomm':'Cairomm C++ bindings to Cairo library | configured using pkg-config | try setting PKG_CONFIG_PATH SCons option',
-    'cairomm-version':'Cairomm version is too old (so cairo renderer will not be built), you need at least %s' % CAIROMM_MIN_VERSION,
-    'pycairo':'Python bindings to Cairo library | configured using pkg-config | try setting PKG_CONFIG_PATH SCons option',
     'proj':'Proj.4 C Projections library | configure with PROJ_LIBS & PROJ_INCLUDES | more info: http://trac.osgeo.org/proj/',
-    'pg':'Postgres C Library requiered for PostGIS plugin | configure with pg_config program | more info: http://trac.mapnik.org/wiki/PostGIS',
-    'sqlite3':'SQLite3 C Library | configure with SQLITE_LIBS & SQLITE_INCLUDES | more info: http://trac.mapnik.org/wiki/SQLite',
+    'pg':'Postgres C Library required for PostGIS plugin | configure with pg_config program or configure with PG_LIBS & PG_INCLUDES | more info: https://github.com/mapnik/mapnik/wiki/PostGIS',
+    'sqlite3':'SQLite3 C Library | configure with SQLITE_LIBS & SQLITE_INCLUDES | more info: https://github.com/mapnik/mapnik/wiki/SQLite',
     'jpeg':'JPEG C library | configure with JPEG_LIBS & JPEG_INCLUDES',
     'tiff':'TIFF C library | configure with TIFF_LIBS & TIFF_INCLUDES',
     'png':'PNG C library | configure with PNG_LIBS & PNG_INCLUDES',
+    'webp':'WEBP C library | configure with WEBP_LIBS & WEBP_INCLUDES',
     'icuuc':'ICU C++ library | configure with ICU_LIBS & ICU_INCLUDES or use ICU_LIB_NAME to specify custom lib name  | more info: http://site.icu-project.org/',
-    'ltdl':'GNU Libtool | more info: http://www.gnu.org/software/libtool',
+    'harfbuzz':'HarfBuzz text shaping library | configure with HB_LIBS & HB_INCLUDES',
+    'harfbuzz-min-version':'HarfBuzz >= %s (required for font-feature-settings support)' % HARFBUZZ_MIN_VERSION_STRING,
     'z':'Z compression library | more info: http://www.zlib.net/',
     'm':'Basic math library, part of C++ stlib',
     'pkg-config':'pkg-config tool | more info: http://pkg-config.freedesktop.org',
     'pg_config':'pg_config program | try setting PG_CONFIG SCons option',
-    'xml2-config':'xml2-config program | try setting XML2_CONFIG SCons option',
+    'pq':'libpq library (postgres client) | try setting PG_CONFIG SCons option or configure with PG_LIBS & PG_INCLUDES',
+    'xml2-config':'xml2-config program | try setting XML2_CONFIG SCons option or avoid the need for xml2-config command by configuring with XML2_LIBS & XML2_INCLUDES',
+    'libxml2':'libxml2 library | try setting XML2_CONFIG SCons option to point to location of xml2-config program or configure with XML2_LIBS & XML2_INCLUDES',
     'gdal-config':'gdal-config program | try setting GDAL_CONFIG SCons option',
-    'geos-config':'geos-config program | try setting GEOS_CONFIG SCons option',
-    'freetype-config':'freetype-config program | try setting FREETYPE_CONFIG SCons option',
-    'osm':'more info: http://trac.mapnik.org/wiki/OsmPlugin',
-    'curl':'libcurl is required for the "osm" plugin - more info: http://trac.mapnik.org/wiki/OsmPlugin',
+    'freetype-config':'freetype-config program | try setting FREETYPE_CONFIG SCons option or configure with FREETYPE_LIBS & FREETYPE_INCLUDES',
+    'freetype':'libfreetype library | try setting FREETYPE_CONFIG SCons option or configure with FREETYPE_LIBS & FREETYPE_INCLUDES',
+    'osm':'more info: https://github.com/mapnik/mapnik/wiki/OsmPlugin',
     'boost_regex_icu':'libboost_regex built with optional ICU unicode support is needed for unicode regex support in mapnik.',
     'sqlite_rtree':'The SQLite plugin requires libsqlite3 built with RTREE support (-DSQLITE_ENABLE_RTREE=1)',
-    'pgsql2sqlite_rtree':'The pgsql2sqlite program requires libsqlite3 built with RTREE support (-DSQLITE_ENABLE_RTREE=1)'
+    'pgsql2sqlite_rtree':'The pgsql2sqlite program requires libsqlite3 built with RTREE support (-DSQLITE_ENABLE_RTREE=1)',
+    'PROJ_LIB':'The directory where proj4 stores its data files. Must exist for proj4 to work correctly',
+    'GDAL_DATA':'The directory where GDAL stores its data files. Must exist for GDAL to work correctly',
+    'ICU_DATA':'The directory where icu stores its data files. If ICU reports a path, it must exist. ICU can also be built without .dat files and in that case this path is empty'
     }
 
 # Core plugin build configuration
@@ -89,30 +110,34 @@ pretty_dep_names = {
 PLUGINS = { # plugins with external dependencies
             # configured by calling project, hence 'path':None
             'postgis': {'default':True,'path':None,'inc':'libpq-fe.h','lib':'pq','lang':'C'},
+            'pgraster': {'default':True,'path':None,'inc':'libpq-fe.h','lib':'pq','lang':'C'},
             'gdal':    {'default':True,'path':None,'inc':'gdal_priv.h','lib':'gdal','lang':'C++'},
             'ogr':     {'default':True,'path':None,'inc':'ogrsf_frmts.h','lib':'gdal','lang':'C++'},
-            'geos':    {'default':False,'path':None,'inc':'geos_c.h','lib':'geos_c','lang':'C'},
-            # configured with custom paths, hence 'path': PREFIX/INCLUDES/LIBS
-            'occi':    {'default':False,'path':'OCCI','inc':'occi.h','lib':'ociei','lang':'C++'},
             'sqlite':  {'default':True,'path':'SQLITE','inc':'sqlite3.h','lib':'sqlite3','lang':'C'},
-            'rasterlite':  {'default':False,'path':'RASTERLITE','inc':['sqlite3.h','rasterlite.h'],'lib':'rasterlite','lang':'C'},
-
-            # todo: osm plugin does also depend on libxml2 (but there is a separate check for that)
-            'osm':     {'default':True,'path':None,'inc':'curl/curl.h','lib':'curl','lang':'C'},
-
             # plugins without external dependencies requiring CheckLibWithHeader...
             'shape':   {'default':True,'path':None,'inc':None,'lib':None,'lang':'C++'},
             'csv':     {'default':True,'path':None,'inc':None,'lib':None,'lang':'C++'},
             'raster':  {'default':True,'path':None,'inc':None,'lib':None,'lang':'C++'},
             'geojson': {'default':True,'path':None,'inc':None,'lib':None,'lang':'C++'},
-            'kismet':  {'default':False,'path':None,'inc':None,'lib':None,'lang':'C++'},
+            'geobuf':  {'default':True,'path':None,'inc':None,'lib':None,'lang':'C++'},
+            'topojson':{'default':True,'path':None,'inc':None,'lib':None,'lang':'C++'}
             }
 
 
+def init_environment(env):
+    env.Decider('MD5-timestamp')
+    env.SourceCode(".", None)
+    if os.environ.get('RANLIB'):
+        env['RANLIB'] = os.environ['RANLIB']
+    if os.environ.get('AR'):
+        env['AR'] = os.environ['AR']
+
 #### SCons build options and initial setup ####
 env = Environment(ENV=os.environ)
-env.Decider('MD5-timestamp')
-env.SourceCode(".", None)
+init_environment(env)
+
+def fix_path(path):
+    return os.path.abspath(path)
 
 def color_print(color,text,newline=True):
     # 1 - red
@@ -136,7 +161,7 @@ def call(cmd, silent=False):
     if not stderr:
         return stdin.strip()
     elif not silent:
-        color_print(1,'Problem encounted with SCons scripts, please post bug report to: http://trac.mapnik.org\nError was: %s' % stderr)
+        color_print(1,'Problem encounted with SCons scripts, please post bug report to: https://github.com/mapnik/mapnik/issues \nError was: %s' % stderr)
 
 def strip_first(string,find,replace=''):
     if string.startswith(find):
@@ -169,10 +194,14 @@ def shortest_name(libs):
             name = lib
     return name
 
+def rm_path(item,set,_env):
+    for i in _env[set]:
+        if i.startswith(item):
+            _env[set].remove(i)
 
 def sort_paths(items,priority):
     """Sort paths such that compiling and linking will globally prefer custom or local libs
-    over system libraries by fixing up the order libs are passed to gcc and the linker.
+    over system libraries by fixing up the order libs are passed to the compiler and the linker.
 
     Ideally preference could be by-target instead of global, but our SCons implementation
     is not currently utilizing different SCons build env()'s as we should.
@@ -237,20 +266,12 @@ def sort_paths(items,priority):
         new.extend(v)
     return new
 
-if platform.dist()[0] in ('Ubuntu','debian'):
-    LIBDIR_SCHEMA='lib'
-elif platform.uname()[4] == 'ppc64':
-    LIBDIR_SCHEMA='lib64'
-else:
-    LIBDIR_SCHEMA='lib'
-
-
 def pretty_dep(dep):
     pretty = pretty_dep_names.get(dep)
     if pretty:
         return '%s (%s)' % (dep,pretty)
     elif 'boost' in dep:
-        return '%s (%s)' % (dep,'more info see: http://trac.mapnik.org/wiki/MapnikInstallation & http://www.boost.org')
+        return '%s (%s)' % (dep,'more info see: https://github.com/mapnik/mapnik/wiki/Mapnik-Installation & http://www.boost.org')
     return dep
 
 
@@ -265,23 +286,30 @@ opts = Variables()
 
 opts.AddVariables(
     # Compiler options
-    ('CXX', 'The C++ compiler to use to compile mapnik (defaults to g++).', 'g++'),
-    ('CC', 'The C compiler used for configure checks of C libs (defaults to gcc).', 'gcc'),
+    ('CXX', 'The C++ compiler to use to compile mapnik', DEFAULT_CXX),
+    ('CC', 'The C compiler used for configure checks of C libs.', DEFAULT_CC),
     ('CUSTOM_CXXFLAGS', 'Custom C++ flags, e.g. -I<include dir> if you have headers in a nonstandard directory <include dir>', ''),
+    ('CUSTOM_DEFINES', 'Custom Compiler DEFINES, e.g. -DENABLE_THIS', ''),
     ('CUSTOM_CFLAGS', 'Custom C flags, e.g. -I<include dir> if you have headers in a nonstandard directory <include dir> (only used for configure checks)', ''),
     ('CUSTOM_LDFLAGS', 'Custom linker flags, e.g. -L<lib dir> if you have libraries in a nonstandard directory <lib dir>', ''),
     EnumVariable('LINKING', "Set library format for libmapnik",'shared', ['shared','static']),
     EnumVariable('RUNTIME_LINK', "Set preference for linking dependencies",'shared', ['shared','static']),
-    EnumVariable('OPTIMIZATION','Set g++ optimization level','3', ['0','1','2','3','4','s']),
+    EnumVariable('OPTIMIZATION','Set compiler optimization level','3', ['0','1','2','3','4','s']),
     # Note: setting DEBUG=True will override any custom OPTIMIZATION level
     BoolVariable('DEBUG', 'Compile a debug version of Mapnik', 'False'),
+    BoolVariable('COVERAGE', 'Compile a libmapnik and plugins with --coverage', 'False'),
     BoolVariable('DEBUG_UNDEFINED', 'Compile a version of Mapnik using clang/llvm undefined behavior asserts', 'False'),
+    BoolVariable('DEBUG_SANITIZE', 'Compile a version of Mapnik using clang/llvm address sanitation', 'False'),
     ListVariable('INPUT_PLUGINS','Input drivers to include',DEFAULT_PLUGINS,PLUGINS.keys()),
     ('WARNING_CXXFLAGS', 'Compiler flags you can set to reduce warning levels which are placed after -Wall.', ''),
 
     # SCons build behavior options
+    ('HOST', 'Set the target host for cross compiling', ''),
     ('CONFIG', "The path to the python file in which to save user configuration options. Currently : '%s'" % SCONS_LOCAL_CONFIG,SCONS_LOCAL_CONFIG),
     BoolVariable('USE_CONFIG', "Use SCons user '%s' file (will also write variables after successful configuration)", 'True'),
+    BoolVariable('NO_ATEXIT', 'Will prevent Singletons from being deleted atexit of main thread', 'False'),
+    BoolVariable('NO_DLCLOSE', 'Will prevent plugins from being unloaded', 'False'),
+    BoolVariable('ENABLE_GLIBC_WORKAROUND', "Workaround known GLIBC symbol exports to allow building against libstdc++-4.8 without binaries needing throw_out_of_range_fmt", 'False'),
     # http://www.scons.org/wiki/GoFastButton
     # http://stackoverflow.com/questions/1318863/how-to-optimize-an-scons-script
     BoolVariable('FAST', "Make SCons faster at the cost of less precise dependency tracking", 'False'),
@@ -290,11 +318,12 @@ opts.AddVariables(
 
     # Install Variables
     ('PREFIX', 'The install path "prefix"', '/usr/local'),
-    ('PYTHON_PREFIX','Custom install path "prefix" for python bindings (default of no prefix)',''),
+    ('LIBDIR_SCHEMA', 'The library sub-directory appended to the "prefix", sometimes lib64 on 64bit linux systems', LIBDIR_SCHEMA_DEFAULT),
     ('DESTDIR', 'The root directory to install into. Useful mainly for binary package building', '/'),
     ('PATH', 'A custom path (or multiple paths divided by ":") to append to the $PATH env to prioritize usage of command line programs (if multiple are present on the system)', ''),
-    ('PATH_REMOVE', 'A path prefix to exclude from all known command and compile paths', ''),
+    ('PATH_REMOVE', 'A path prefix to exclude from all known command and compile paths (create multiple excludes separated by :)', ''),
     ('PATH_REPLACE', 'Two path prefixes (divided with a :) to search/replace from all known command and compile paths', ''),
+    ('MAPNIK_NAME', 'Name of library', 'mapnik'),
 
     # Boost variables
     # default is '/usr/include', see FindBoost method below
@@ -304,69 +333,85 @@ opts.AddVariables(
     ('BOOST_TOOLKIT','Specify boost toolkit, e.g., gcc41.','',False),
     ('BOOST_ABI', 'Specify boost ABI, e.g., d.','',False),
     ('BOOST_VERSION','Specify boost version, e.g., 1_35.','',False),
-    ('BOOST_PYTHON_LIB','Specify library name to specific Boost Python lib (e.g. "boost_python-py26")','boost_python'),
 
     # Variables for required dependencies
     ('FREETYPE_CONFIG', 'The path to the freetype-config executable.', 'freetype-config'),
     ('XML2_CONFIG', 'The path to the xml2-config executable.', 'xml2-config'),
-    PathVariable('ICU_INCLUDES', 'Search path for ICU include files', '/usr/include', PathVariable.PathAccept),
-    PathVariable('ICU_LIBS','Search path for ICU include files','/usr/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
-    ('ICU_LIB_NAME', 'The library name for icu (such as icuuc, sicuuc, or icucore)', 'icuuc'),
+    PathVariable('ICU_INCLUDES', 'Search path for ICU include files', ICU_INCLUDES_DEFAULT, PathVariable.PathAccept),
+    PathVariable('ICU_LIBS','Search path for ICU include files',ICU_LIBS_DEFAULT + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
+    ('ICU_LIB_NAME', 'The library name for icu (such as icuuc, sicuuc, or icucore)', 'icuuc', PathVariable.PathAccept),
+    PathVariable('HB_INCLUDES', 'Search path for HarfBuzz include files', '/usr/include', PathVariable.PathAccept),
+    PathVariable('HB_LIBS','Search path for HarfBuzz include files','/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
+    BoolVariable('PNG', 'Build Mapnik with PNG read and write support', 'True'),
     PathVariable('PNG_INCLUDES', 'Search path for libpng include files', '/usr/include', PathVariable.PathAccept),
-    PathVariable('PNG_LIBS','Search path for libpng include files','/usr/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
+    PathVariable('PNG_LIBS','Search path for libpng library files','/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
     BoolVariable('JPEG', 'Build Mapnik with JPEG read and write support', 'True'),
     PathVariable('JPEG_INCLUDES', 'Search path for libjpeg include files', '/usr/include', PathVariable.PathAccept),
-    PathVariable('JPEG_LIBS', 'Search path for libjpeg library files', '/usr/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
+    PathVariable('JPEG_LIBS', 'Search path for libjpeg library files', '/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
+    BoolVariable('TIFF', 'Build Mapnik with TIFF read and write support', 'True'),
     PathVariable('TIFF_INCLUDES', 'Search path for libtiff include files', '/usr/include', PathVariable.PathAccept),
-    PathVariable('TIFF_LIBS', 'Search path for libtiff library files', '/usr/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
-    PathVariable('PROJ_INCLUDES', 'Search path for PROJ.4 include files', '/usr/local/include', PathVariable.PathAccept),
-    PathVariable('PROJ_LIBS', 'Search path for PROJ.4 library files', '/usr/local/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
+    PathVariable('TIFF_LIBS', 'Search path for libtiff library files', '/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
+    BoolVariable('WEBP', 'Build Mapnik with WEBP read', 'True'),
+    PathVariable('WEBP_INCLUDES', 'Search path for libwebp include files', '/usr/include', PathVariable.PathAccept),
+    PathVariable('WEBP_LIBS','Search path for libwebp library files','/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
+    BoolVariable('PROJ', 'Build Mapnik with proj4 support to enable transformations between many different projections', 'True'),
+    PathVariable('PROJ_INCLUDES', 'Search path for PROJ.4 include files', '/usr/include', PathVariable.PathAccept),
+    PathVariable('PROJ_LIBS', 'Search path for PROJ.4 library files', '/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
+    ('PG_INCLUDES', 'Search path for libpq (postgres client) include files', ''),
+    ('PG_LIBS', 'Search path for libpq (postgres client) library files', ''),
+    ('FREETYPE_INCLUDES', 'Search path for Freetype include files', ''),
+    ('FREETYPE_LIBS', 'Search path for Freetype library files', ''),
+    ('XML2_INCLUDES', 'Search path for libxml2 include files', ''),
+    ('XML2_LIBS', 'Search path for libxml2 library files', ''),
     ('PKG_CONFIG_PATH', 'Use this path to point pkg-config to .pc files instead of the PKG_CONFIG_PATH environment setting',''),
 
     # Variables affecting rendering back-ends
 
-    BoolVariable('RENDERING_STATS', 'Output rendering statistics during style processing', 'False'),
-
+    BoolVariable('GRID_RENDERER', 'build support for native grid renderer', 'True'),
     BoolVariable('SVG_RENDERER', 'build support for native svg renderer', 'False'),
+    BoolVariable('CPP_TESTS', 'Compile the C++ tests', 'True'),
+    BoolVariable('BENCHMARK', 'Compile the C++ benchmark scripts', 'False'),
 
     # Variables for optional dependencies
-    ('GEOS_CONFIG', 'The path to the geos-config executable.', 'geos-config'),
-    # Note: cairo, cairomm, and pycairo all optional but configured automatically through pkg-config
+    # Note: cairo and and pycairo are optional but configured automatically through pkg-config
     # Therefore, we use a single boolean for whether to attempt to build cairo support.
     BoolVariable('CAIRO', 'Attempt to build with Cairo rendering support', 'True'),
-    PathVariable('CAIRO_INCLUDES', 'Search path for cairo/cairomm include files', '',PathVariable.PathAccept),
-    PathVariable('CAIRO_LIBS', 'Search path for cairo/cairomm library files','',PathVariable.PathAccept),
+    PathVariable('CAIRO_INCLUDES', 'Search path for cairo include files', '',PathVariable.PathAccept),
+    PathVariable('CAIRO_LIBS', 'Search path for cairo library files','',PathVariable.PathAccept),
     ('GDAL_CONFIG', 'The path to the gdal-config executable for finding gdal and ogr details.', 'gdal-config'),
     ('PG_CONFIG', 'The path to the pg_config executable.', 'pg_config'),
     PathVariable('OCCI_INCLUDES', 'Search path for OCCI include files', '/usr/lib/oracle/10.2.0.3/client/include', PathVariable.PathAccept),
-    PathVariable('OCCI_LIBS', 'Search path for OCCI library files', '/usr/lib/oracle/10.2.0.3/client/'+ LIBDIR_SCHEMA, PathVariable.PathAccept),
+    PathVariable('OCCI_LIBS', 'Search path for OCCI library files', '/usr/lib/oracle/10.2.0.3/client/'+ LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
     PathVariable('SQLITE_INCLUDES', 'Search path for SQLITE include files', '/usr/include/', PathVariable.PathAccept),
-    PathVariable('SQLITE_LIBS', 'Search path for SQLITE library files', '/usr/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
+    PathVariable('SQLITE_LIBS', 'Search path for SQLITE library files', '/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
     PathVariable('RASTERLITE_INCLUDES', 'Search path for RASTERLITE include files', '/usr/include/', PathVariable.PathAccept),
-    PathVariable('RASTERLITE_LIBS', 'Search path for RASTERLITE library files', '/usr/' + LIBDIR_SCHEMA, PathVariable.PathAccept),
+    PathVariable('RASTERLITE_LIBS', 'Search path for RASTERLITE library files', '/usr/' + LIBDIR_SCHEMA_DEFAULT, PathVariable.PathAccept),
 
     # Variables for logging and statistics
     BoolVariable('ENABLE_LOG', 'Enable logging, which is enabled by default when building in *debug*', 'False'),
     BoolVariable('ENABLE_STATS', 'Enable global statistics during map processing', 'False'),
-    ('DEFAULT_LOG_SEVERITY', 'The default severity of the logger (eg. "info", "debug", "warn", "error", "fatal", "none")', 'error'),
+    ('DEFAULT_LOG_SEVERITY', 'The default severity of the logger (eg. ' + ', '.join(severities) + ')', 'error'),
+
+    # Plugin linking
+    EnumVariable('PLUGIN_LINKING', "Set plugin linking with libmapnik", 'shared', ['shared','static']),
 
     # Other variables
-    BoolVariable('SHAPE_MEMORY_MAPPED_FILE', 'Utilize memory-mapped files in Shapefile Plugin (higher memory usage, better performance)', 'True'),
-    ('SYSTEM_FONTS','Provide location for python bindings to register fonts (if given aborts installation of bundled DejaVu fonts)',''),
+    BoolVariable('MEMORY_MAPPED_FILE', 'Utilize memory-mapped files in Shapefile Plugin (higher memory usage, better performance)', 'True'),
+    ('SYSTEM_FONTS','Provide location for python bindings to register fonts (if provided then the bundled DejaVu fonts are not installed)',''),
     ('LIB_DIR_NAME','Name to use for the subfolder beside libmapnik where fonts and plugins are installed','mapnik'),
     PathVariable('PYTHON','Full path to Python executable used to build bindings', sys.executable),
-    BoolVariable('FRAMEWORK_PYTHON', 'Link against Framework Python on Mac OS X', 'True'),
-    BoolVariable('PYTHON_DYNAMIC_LOOKUP', 'On OSX, do not directly link python lib, but rather dynamically lookup symbols', 'True'),
-    ('FRAMEWORK_SEARCH_PATH','Custom framework search path on Mac OS X', ''),
-    BoolVariable('FULL_LIB_PATH', 'Use the full path for the libmapnik.dylib "install_name" when linking on Mac OS X', 'True'),
-    ListVariable('BINDINGS','Language bindings to build','all',['python']),
+    BoolVariable('FULL_LIB_PATH', 'Embed the full and absolute path to libmapnik when linking ("install_name" on OS X/rpath on Linux)', 'True'),
+    BoolVariable('ENABLE_SONAME', 'Embed a soname in libmapnik on Linux', 'True'),
     EnumVariable('THREADING','Set threading support','multi', ['multi','single']),
-    EnumVariable('XMLPARSER','Set xml parser','libxml2', ['libxml2','ptree']),
-    ('JOBS', 'Set the number of parallel compilations', "1", lambda key, value, env: int(value), int),
+    EnumVariable('XMLPARSER','Set xml parser','ptree', ['libxml2','ptree']),
     BoolVariable('DEMO', 'Compile demo c++ application', 'True'),
     BoolVariable('PGSQL2SQLITE', 'Compile and install a utility to convert postgres tables to sqlite', 'False'),
+    BoolVariable('SHAPEINDEX', 'Compile and install a utility to generate shapefile indexes in the custom format (.index) Mapnik supports', 'True'),
+    BoolVariable('MAPNIK_INDEX', 'Compile and install a utility to generate spatial indexes for CSV and GeoJSON in the custom format (.index) Mapnik supports', 'True'),
+    BoolVariable('SVG2PNG', 'Compile and install a utility to generate render an svg file to a png on the command line', 'False'),
+    BoolVariable('MAPNIK_RENDER', 'Compile and install a utility to render a map to an image', 'True'),
     BoolVariable('COLOR_PRINT', 'Print build status information in color', 'True'),
-    BoolVariable('SAMPLE_INPUT_PLUGINS', 'Compile and install sample plugins', 'False'),
+    BoolVariable('BIGINT', 'Compile support for 64-bit integers in mapnik::value', 'True'),
     )
 
 # variables to pickle after successful configure step
@@ -384,6 +429,7 @@ pickle_store = [# Scons internal variables
         'LIBS',
         'LINKFLAGS',
         'CUSTOM_LDFLAGS', # user submitted
+        'CUSTOM_DEFINES', # user submitted
         'CUSTOM_CXXFLAGS', # user submitted
         'CUSTOM_CFLAGS', # user submitted
         'MAPNIK_LIB_NAME',
@@ -393,22 +439,18 @@ pickle_store = [# Scons internal variables
         'PLUGINS',
         'ABI_VERSION',
         'MAPNIK_VERSION_STRING',
+        'MAPNIK_VERSION',
         'PLATFORM',
         'BOOST_ABI',
         'BOOST_APPEND',
         'LIBDIR_SCHEMA',
         'REQUESTED_PLUGINS',
-        'SUNCC',
-        'PYTHON_VERSION',
-        'PYTHON_INCLUDES',
-        'PYTHON_INSTALL_LOCATION',
-        'PYTHON_SYS_PREFIX',
         'COLOR_PRINT',
         'HAS_CAIRO',
+        'MAPNIK_HAS_DLFCN',
         'HAS_PYCAIRO',
+        'PYCAIRO_PATHS',
         'HAS_LIBXML2',
-        'PYTHON_IS_64BIT',
-        'SAMPLE_INPUT_PLUGINS',
         'PKG_CONFIG_PATH',
         'PATH',
         'PATH_REMOVE',
@@ -420,17 +462,25 @@ pickle_store = [# Scons internal variables
         'MAPNIK_INPUT_PLUGINS_DEST',
         'MAPNIK_FONTS',
         'MAPNIK_FONTS_DEST',
+        'MAPNIK_BUNDLED_SHARE_DIRECTORY',
         'MAPNIK_LIB_BASE',
         'MAPNIK_LIB_BASE_DEST',
         'EXTRA_FREETYPE_LIBS',
         'LIBMAPNIK_CPPATHS',
+        'LIBMAPNIK_DEFINES',
         'LIBMAPNIK_CXXFLAGS',
-        'CAIROMM_LIBPATHS',
-        'CAIROMM_LINKFLAGS',
-        'CAIROMM_CPPPATHS',
+        'CAIRO_LIBPATHS',
+        'CAIRO_ALL_LIBS',
+        'CAIRO_CPPPATHS',
+        'GRID_RENDERER',
         'SVG_RENDERER',
         'SQLITE_LINKFLAGS',
-        'BOOST_LIB_VERSION_FROM_HEADER'
+        'BOOST_LIB_VERSION_FROM_HEADER',
+        'BIGINT',
+        'HOST',
+        'QUERIED_GDAL_DATA',
+        'QUERIED_ICU_DATA',
+        'QUERIED_PROJ_LIB'
         ]
 
 # Add all other user configurable options to pickle pickle_store
@@ -451,12 +501,18 @@ HELP_REQUESTED = False
 if ('-h' in command_line_args) or ('--help' in command_line_args):
     HELP_REQUESTED = True
 
-
 if 'configure' in command_line_args and not HELP_REQUESTED:
     force_configure = True
 elif HELP_REQUESTED:
     # to ensure config gets skipped when help is requested
     preconfigured = True
+
+# need no-op for clean on fresh checkout
+# https://github.com/mapnik/mapnik/issues/2112
+if not os.path.exists(SCONS_LOCAL_LOG) and not os.path.exists(SCONS_CONFIGURE_CACHE) \
+  and ('-c' in command_line_args or '--clean' in command_line_args):
+    print 'all good: nothing to clean, but you might want to run "make distclean"'
+    Exit(0)
 
 # initially populate environment with defaults and any possible custom arguments
 opts.Update(env)
@@ -541,7 +597,7 @@ def parse_config(context, config, checks='--libs --cflags'):
     env = context.env
     tool = config.lower().replace('_','-')
     toolname = tool
-    if config in ('GDAL_CONFIG','GEOS_CONFIG'):
+    if config in ('GDAL_CONFIG'):
         toolname += ' %s' % checks
     context.Message( 'Checking for %s... ' % toolname)
     cmd = '%s %s' % (env[config],checks)
@@ -570,12 +626,14 @@ def parse_config(context, config, checks='--libs --cflags'):
             ret = False
             print ' (xml2-config not found!)'
     if not parsed:
-        if config in ('GDAL_CONFIG','GEOS_CONFIG'):
+        if config in ('GDAL_CONFIG'):
             # optional deps...
-            env['SKIPPED_DEPS'].append(tool)
+            if tool not in env['SKIPPED_DEPS']:
+                env['SKIPPED_DEPS'].append(tool)
             conf.rollback_option(config)
         else: # freetype and libxml2, not optional
-            env['MISSING_DEPS'].append(tool)
+            if tool not in env['MISSING_DEPS']:
+                env['MISSING_DEPS'].append(tool)
     context.Result( ret )
     return ret
 
@@ -590,6 +648,10 @@ def get_pkg_lib(context, config, lib):
     if ret:
         try:
             value = call(cmd,silent=True)
+            if ' ' in value:
+                parts = value.split(' ')
+                if len(parts) > 1:
+                    value = parts[1]
             libnames = re.findall(libpattern,value)
             if libnames:
                 libname = libnames[0]
@@ -612,8 +674,8 @@ def parse_pg_config(context, config):
     if ret:
         lib_path = call('%s --libdir' % env[config])
         inc_path = call('%s --includedir' % env[config])
-        env.AppendUnique(CPPPATH = os.path.realpath(inc_path))
-        env.AppendUnique(LIBPATH = os.path.realpath(lib_path))
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
         lpq = env['PLUGINS']['postgis']['lib']
         env.Append(LIBS = lpq)
     else:
@@ -627,7 +689,8 @@ def ogr_enabled(context):
     context.Message( 'Checking if gdal is ogr enabled... ')
     ret = context.TryAction('%s --ogr-enabled' % env['GDAL_CONFIG'])[0]
     if not ret:
-        env['SKIPPED_DEPS'].append('ogr')
+        if 'ogr' not in env['SKIPPED_DEPS']:
+            env['SKIPPED_DEPS'].append('ogr')
     context.Result( ret )
     return ret
 
@@ -649,18 +712,14 @@ def FindBoost(context, prefixes, thread_flag):
     BOOST_INCLUDE_DIR = None
     BOOST_APPEND = None
     env['BOOST_APPEND'] = str()
-
-    if env['THREADING'] == 'multi':
-        search_lib = 'libboost_thread'
-    else:
-        search_lib = 'libboost_filesystem'
+    search_lib = 'libboost_filesystem'
 
     # note: must call normpath to strip trailing slash otherwise dirname
     # does not remove 'lib' and 'include'
     prefixes.insert(0,os.path.dirname(os.path.normpath(env['BOOST_INCLUDES'])))
     prefixes.insert(0,os.path.dirname(os.path.normpath(env['BOOST_LIBS'])))
     for searchDir in prefixes:
-        libItems = glob(os.path.join(searchDir, LIBDIR_SCHEMA, '%s*.*' % search_lib))
+        libItems = glob(os.path.join(searchDir, env['LIBDIR_SCHEMA'], '%s*.*' % search_lib))
         if not libItems:
             libItems = glob(os.path.join(searchDir, 'lib/%s*.*' % search_lib))
         incItems = glob(os.path.join(searchDir, 'include/boost*/'))
@@ -676,25 +735,27 @@ def FindBoost(context, prefixes, thread_flag):
     msg = str()
 
     if BOOST_LIB_DIR:
-        msg += '\n  *libs found: %s' % BOOST_LIB_DIR
+        msg += '\nFound boost libs: %s' % BOOST_LIB_DIR
         env['BOOST_LIBS'] = BOOST_LIB_DIR
+    elif not env['BOOST_LIBS']:
+        env['BOOST_LIBS'] = '/usr/' + env['LIBDIR_SCHEMA']
+        msg += '\nUsing default boost lib dir: %s' % env['BOOST_LIBS']
     else:
-        env['BOOST_LIBS'] = '/usr/' + LIBDIR_SCHEMA
-        msg += '\n  *using default boost lib dir: %s' % env['BOOST_LIBS']
+        msg += '\nUsing boost lib dir: %s' % env['BOOST_LIBS']
 
     if BOOST_INCLUDE_DIR:
-        msg += '\n  *headers found: %s' % BOOST_INCLUDE_DIR
+        msg += '\nFound boost headers: %s' % BOOST_INCLUDE_DIR
         env['BOOST_INCLUDES'] = BOOST_INCLUDE_DIR
-    else:
+    elif not env['BOOST_INCLUDES']:
         env['BOOST_INCLUDES'] = '/usr/include'
-        msg += '\n  *using default boost include dir: %s' % env['BOOST_INCLUDES']
+        msg += '\nUsing default boost include dir: %s' % env['BOOST_INCLUDES']
+    else:
+        msg += '\nUsing boost include dir: %s' % env['BOOST_INCLUDES']
 
     if not env['BOOST_TOOLKIT'] and not env['BOOST_ABI'] and not env['BOOST_VERSION']:
         if BOOST_APPEND:
-            msg += '\n  *lib naming extension found: %s' % BOOST_APPEND
+            msg += '\nFound boost lib name extension: %s' % BOOST_APPEND
             env['BOOST_APPEND'] = BOOST_APPEND
-        else:
-            msg += '\n  *no lib naming extension found'
     else:
         # Creating BOOST_APPEND according to the Boost library naming order,
         # which goes <toolset>-<threading>-<abi>-<version>. See:
@@ -709,10 +770,10 @@ def FindBoost(context, prefixes, thread_flag):
         # Boost libraries.
         if len(append_params) > 1:
             env['BOOST_APPEND'] = '-'.join(append_params)
-        msg += '\n  *using boost lib naming: %s' % env['BOOST_APPEND']
+        msg += '\nFound boost lib name extension: %s' % env['BOOST_APPEND']
 
-    env.AppendUnique(CPPPATH = os.path.realpath(env['BOOST_INCLUDES']))
-    env.AppendUnique(LIBPATH = os.path.realpath(env['BOOST_LIBS']))
+    env.AppendUnique(CPPPATH = fix_path(env['BOOST_INCLUDES']))
+    env.AppendUnique(LIBPATH = fix_path(env['BOOST_LIBS']))
     if env['COLOR_PRINT']:
         msg = "\033[94m%s\033[0m" % (msg)
     ret = context.Result(msg)
@@ -746,6 +807,161 @@ int main()
     context.Result(ret)
     return ret
 
+def CheckIcuData(context, silent=False):
+ 
+    if not silent:
+        context.Message('Checking for ICU data directory...')
+    ret = context.TryRun("""
+
+#include <unicode/putil.h>
+#include <iostream>
+
+int main() {
+    std::string result = u_getDataDirectory();
+    std::cout << result;
+    if (result.empty()) {
+        return -1;
+    }
+    return 0;
+}
+
+""", '.cpp')
+    if silent:
+        context.did_show_result=1
+    if ret[0]:
+        context.Result('u_getDataDirectory returned %s' % ret[1])
+    else:
+        context.Result('Failed to detect (mapnik-config will have null value)')
+    return ret[1].strip()
+
+def CheckGdalData(context, silent=False):
+ 
+    if not silent:
+        context.Message('Checking for GDAL data directory...')
+    ret = context.TryRun("""
+
+#include "cpl_config.h"
+#include <iostream>
+
+int main() {
+    std::cout << GDAL_PREFIX << "/share/gdal" << std::endl;
+    return 0;
+}
+
+""", '.cpp')
+    if silent:
+        context.did_show_result=1
+    if ret[0]:
+        context.Result('GDAL_PREFIX returned %s' % ret[1])
+    else:
+        context.Result('Failed to detect (mapnik-config will have null value)')
+    return ret[1].strip()
+
+def CheckProjData(context, silent=False):
+ 
+    if not silent:
+        context.Message('Checking for PROJ_LIB directory...')
+    ret = context.TryRun("""
+
+// This is narly, could eventually be replaced using https://github.com/OSGeo/proj.4/pull/551]
+#include <proj_api.h>
+#include <iostream>
+
+static void my_proj4_logger(void * user_data, int /*level*/, const char * msg)
+{
+    std::string* posMsg = static_cast<std::string*>(user_data);
+    *posMsg += msg;
+}
+
+// https://github.com/OSGeo/gdal/blob/ddbf6d39aa4b005a77ca4f27c2d61a3214f336f8/gdal/alg/gdalapplyverticalshiftgrid.cpp#L616-L633
+
+std::string find_proj_path(const char * pszFilename) {
+    std::string osMsg;
+    std::string osFilename;
+    projCtx ctx = pj_ctx_alloc();
+    pj_ctx_set_app_data(ctx, &osMsg);
+    pj_ctx_set_debug(ctx, PJ_LOG_DEBUG_MAJOR);
+    pj_ctx_set_logger(ctx, my_proj4_logger);
+    PAFile f = pj_open_lib(ctx, pszFilename, "rb");
+    if( f )
+    {
+        pj_ctx_fclose(ctx, f);
+    }
+    size_t nPos = osMsg.find("fopen(");
+    if( nPos != std::string::npos )
+    {
+        osFilename = osMsg.substr(nPos + strlen("fopen("));
+        nPos = osFilename.find(")");
+        if( nPos != std::string::npos )
+            osFilename = osFilename.substr(0, nPos);
+    }
+    pj_ctx_free(ctx);
+    return osFilename;
+}
+
+
+int main() {
+    std::string result = find_proj_path(" ");
+    std::cout << result;
+    if (result.empty()) {
+        return -1;
+    }
+    return 0;
+}
+
+""", '.cpp')
+    if silent:
+        context.did_show_result=1
+    if ret[0]:
+        context.Result('pj_open_lib returned %s' % ret[1])
+    else:
+        context.Result('Failed to detect (mapnik-config will have null value)')
+    return ret[1].strip()
+
+def CheckCairoHasFreetype(context, silent=False):
+    if not silent:
+        context.Message('Checking for cairo freetype font support ... ')
+    context.env.AppendUnique(CPPPATH=copy(env['CAIRO_CPPPATHS']))
+
+    ret = context.TryRun("""
+
+#include <cairo-features.h>
+
+int main()
+{
+    #ifdef CAIRO_HAS_FT_FONT
+    return 0;
+    #else
+    return 1;
+    #endif
+}
+
+""", '.cpp')[0]
+    if silent:
+        context.did_show_result=1
+    context.Result(ret)
+    for item in env['CAIRO_CPPPATHS']:
+        rm_path(item,'CPPPATH',context.env)
+    return ret
+
+def CheckHasDlfcn(context, silent=False):
+    if not silent:
+        context.Message('Checking for dlfcn.h support ... ')
+    ret = context.TryCompile("""
+
+#include <dlfcn.h>
+
+int main()
+{
+    return 0;
+}
+
+""", '.cpp')
+    if silent:
+        context.did_show_result=1
+    context.Result(ret)
+    return ret
+
 def GetBoostLibVersion(context):
     ret = context.TryRun("""
 
@@ -765,25 +981,23 @@ return 0;
     context.Result(ret[0])
     return ret[1].strip()
 
-def GetMapnikLibVersion(context):
-    ret = context.TryRun("""
-
-#include <mapnik/version.hpp>
-#include <iostream>
+def CheckBoostScopedEnum(context, silent=False):
+    if not silent:
+        context.Message('Checking whether Boost was compiled with C++11 scoped enums ... ')
+    ret = context.TryLink("""
+#include <boost/filesystem.hpp>
 
 int main()
 {
-    std::cout << MAPNIK_VERSION_STRING << std::endl;
+    boost::filesystem::path a, b;
+    boost::filesystem::copy_file(a, b);
     return 0;
 }
-
 """, '.cpp')
-    # hack to avoid printed output
-    context.did_show_result=1
-    context.Result(ret[0])
-    if not ret[1]:
-        return []
-    return ret[1].strip()
+    if silent:
+        context.did_show_result=1
+    context.Result(ret)
+    return ret
 
 def icu_at_least_four_two(context):
     ret = context.TryRun("""
@@ -814,10 +1028,60 @@ int main()
     color_print(1,'\nFound insufficient icu version... %s' % result)
     return False
 
+def harfbuzz_version(context):
+    ret = context.TryRun("""
+
+#include "harfbuzz/hb.h"
+#include <iostream>
+
+int main()
+{
+    std::cout << HB_VERSION_ATLEAST(%s, %s, %s) << ";" << HB_VERSION_STRING;
+    return 0;
+}
+
+""" % HARFBUZZ_MIN_VERSION, '.cpp')
+    # hack to avoid printed output
+    context.Message('Checking for HarfBuzz version >= %s... ' % HARFBUZZ_MIN_VERSION_STRING)
+    context.did_show_result=1
+    result = ret[1].strip()
+    if not result:
+        context.Result('error, could not get version from hb.h')
+        return False
+
+    items = result.split(';')
+    if items[0] == '1':
+        color_print(4,'found: HarfBuzz %s' % items[1])
+        return True
+
+    color_print(1,'\nHarfbuzz >= %s required but found ... %s' % (HARFBUZZ_MIN_VERSION_STRING,items[1]))
+    return False
+
+def harfbuzz_with_freetype_support(context):
+    ret = context.TryRun("""
+
+#include "harfbuzz/hb-ft.h"
+#include <iostream>
+
+int main()
+{
+    return 0;
+}
+
+""", '.cpp')
+    context.Message('Checking for HarfBuzz with freetype support\n')
+    context.Result(ret[0])
+    if ret[0]:
+        return True
+    return False
+
 def boost_regex_has_icu(context):
     if env['RUNTIME_LINK'] == 'static':
-        context.env.Append(LIBS='icui18n')
-        context.env.Append(LIBS='icudata')
+        # re-order icu libs to ensure linux linker is happy
+        for lib_name in ['icui18n',env['ICU_LIB_NAME'],'icudata']:
+            if lib_name in context.env['LIBS']:
+                context.env['LIBS'].remove(lib_name)
+            context.env.Append(LIBS=lib_name)
     ret = context.TryRun("""
 
 #include <boost/regex/icu.hpp>
@@ -825,7 +1089,7 @@ def boost_regex_has_icu(context):
 
 int main()
 {
-    UnicodeString ustr;
+    U_NAMESPACE_QUALIFIER UnicodeString ustr;
     try {
         boost::u32regex pattern = boost::make_u32regex(ustr);
     }
@@ -844,7 +1108,7 @@ int main()
         return True
     return False
 
-def sqlite_has_rtree(context):
+def sqlite_has_rtree(context, silent=False):
     """ check an sqlite3 install has rtree support.
 
     PRAGMA compile_options;
@@ -870,10 +1134,12 @@ int main()
     if (rc != SQLITE_OK)
     {
         printf("error 2: %s\\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
     }
     else
     {
         printf("yes, has rtree!\\n");
+        sqlite3_close(db);
         return 0;
     }
 
@@ -881,11 +1147,38 @@ int main()
 }
 
 """, '.c')
-    context.Message('Checking if SQLite supports RTREE... ')
+    if not silent:
+        context.Message('Checking if SQLite supports RTREE... ')
+    if silent:
+        context.did_show_result=1
     context.Result(ret[0])
     if ret[0]:
         return True
     return False
+
+def supports_cxx14(context,silent=False):
+    ret = context.TryRun("""
+
+int main()
+{
+#if __cplusplus >= 201402L
+    return 0;
+#else
+    return -1;
+#endif
+}
+
+""", '.cpp')
+    if not silent:
+        context.Message('Checking if compiler (%s) supports -std=c++14 flag... ' % context.env.get('CXX','CXX'))
+    if silent:
+        context.did_show_result=1
+    context.Result(ret[0])
+    if ret[0]:
+        return True
+    return False
+
+
 
 conf_tests = { 'prioritize_paths'      : prioritize_paths,
                'CheckPKGConfig'        : CheckPKGConfig,
@@ -893,18 +1186,37 @@ conf_tests = { 'prioritize_paths'      : prioritize_paths,
                'CheckPKGVersion'       : CheckPKGVersion,
                'FindBoost'             : FindBoost,
                'CheckBoost'            : CheckBoost,
+               'CheckIcuData'          : CheckIcuData,
+               'CheckProjData'         : CheckProjData,
+               'CheckGdalData'         : CheckGdalData,
+               'CheckCairoHasFreetype' : CheckCairoHasFreetype,
+               'CheckHasDlfcn'         : CheckHasDlfcn,
                'GetBoostLibVersion'    : GetBoostLibVersion,
-               'GetMapnikLibVersion'   : GetMapnikLibVersion,
                'parse_config'          : parse_config,
                'parse_pg_config'       : parse_pg_config,
                'ogr_enabled'           : ogr_enabled,
                'get_pkg_lib'           : get_pkg_lib,
                'rollback_option'       : rollback_option,
                'icu_at_least_four_two' : icu_at_least_four_two,
+               'harfbuzz_version'      : harfbuzz_version,
+               'harfbuzz_with_freetype_support': harfbuzz_with_freetype_support,
                'boost_regex_has_icu'   : boost_regex_has_icu,
                'sqlite_has_rtree'      : sqlite_has_rtree,
+               'supports_cxx14'        : supports_cxx14,
+               'CheckBoostScopedEnum'  : CheckBoostScopedEnum,
                }
 
+def GetMapnikLibVersion():
+    ver = []
+    for line in open('include/mapnik/version.hpp').readlines():
+        if line.startswith('#define MAPNIK_MAJOR_VERSION'):
+            ver.append(line.split(' ')[2].strip())
+        if line.startswith('#define MAPNIK_MINOR_VERSION'):
+            ver.append(line.split(' ')[2].strip())
+        if line.startswith('#define MAPNIK_PATCH_VERSION'):
+            ver.append(line.split(' ')[2].strip())
+    version_string = ".".join(ver)
+    return version_string
 
 if not preconfigured:
 
@@ -934,11 +1246,11 @@ if not preconfigured:
                     color_print(1,"SCons CONFIG not found: '%s'" % conf)
             # Recreate the base environment using modified `opts`
             env = Environment(ENV=os.environ,options=opts)
-            env.Decider('MD5-timestamp')
-            env.SourceCode(".", None)
+            init_environment(env)
             env['USE_CONFIG'] = True
     else:
         color_print(4,'SCons USE_CONFIG specified as false, will not inherit variables python config file...')
+
 
     conf = Configure(env, custom_tests = conf_tests)
 
@@ -947,24 +1259,36 @@ if not preconfigured:
     else:
         mode = 'release mode'
 
+    if env['COVERAGE']:
+        mode += ' (with coverage)'
+
     env['PLATFORM'] = platform.uname()[0]
     color_print(4,"Configuring on %s in *%s*..." % (env['PLATFORM'],mode))
+
+    cxx_version = call("%s --version" % env["CXX"] ,silent=True)
+    color_print(5, "CXX %s" % cxx_version)
 
     env['MISSING_DEPS'] = []
     env['SKIPPED_DEPS'] = []
     env['HAS_CAIRO'] = False
-    env['CAIROMM_LIBPATHS'] = []
-    env['CAIROMM_LINKFLAGS'] = []
-    env['CAIROMM_CPPPATHS'] = []
+    env['CAIRO_LIBPATHS'] = []
+    env['CAIRO_ALL_LIBS'] = []
+    env['CAIRO_CPPPATHS'] = []
     env['HAS_PYCAIRO'] = False
+    env['PYCAIRO_PATHS'] = []
     env['HAS_LIBXML2'] = False
     env['LIBMAPNIK_LIBS'] = []
+    env['LIBMAPNIK_LINKFLAGS'] = []
     env['LIBMAPNIK_CPPATHS'] = []
+    env['LIBMAPNIK_DEFINES'] = []
     env['LIBMAPNIK_CXXFLAGS'] = []
-    env['LIBDIR_SCHEMA'] = LIBDIR_SCHEMA
     env['PLUGINS'] = PLUGINS
     env['EXTRA_FREETYPE_LIBS'] = []
     env['SQLITE_LINKFLAGS'] = []
+    env['QUERIED_PROJ_LIB'] = None
+    env['QUERIED_ICU_DATA'] = None
+    env['QUERIED_GDAL_DATA'] = None
+
     # previously a leading / was expected for LIB_DIR_NAME
     # now strip it to ensure expected behavior
     if env['LIB_DIR_NAME'].startswith(os.path.sep):
@@ -985,7 +1309,7 @@ if not preconfigured:
     # install prefix is a pre-pended base location to
     # re-route the install and only intended for package building
     # we normalize to ensure no trailing slash and proper pre-pending to the absolute prefix
-    install_prefix = os.path.normpath(os.path.realpath(env['DESTDIR'])) + os.path.realpath(env['PREFIX'])
+    install_prefix = os.path.normpath(fix_path(env['DESTDIR'])) + fix_path(env['PREFIX'])
     env['INSTALL_PREFIX'] = strip_first(install_prefix,'//','/')
     # all values from above based on install_prefix
     # if env['DESTDIR'] == '/' these should be unchanged
@@ -998,29 +1322,34 @@ if not preconfigured:
         env['MAPNIK_FONTS_DEST'] = os.path.join(env['MAPNIK_LIB_DIR_DEST'],'fonts')
 
     if env['LINKING'] == 'static':
-       env['MAPNIK_LIB_NAME'] = '${LIBPREFIX}mapnik${LIBSUFFIX}'
+       env['MAPNIK_LIB_NAME'] = '${LIBPREFIX}${MAPNIK_NAME}${LIBSUFFIX}'
     else:
-       env['MAPNIK_LIB_NAME'] = '${SHLIBPREFIX}mapnik${SHLIBSUFFIX}'
+       env['MAPNIK_LIB_NAME'] = '${SHLIBPREFIX}${MAPNIK_NAME}${SHLIBSUFFIX}'
 
     if env['PKG_CONFIG_PATH']:
-        env['ENV']['PKG_CONFIG_PATH'] = os.path.realpath(env['PKG_CONFIG_PATH'])
+        env['ENV']['PKG_CONFIG_PATH'] = fix_path(env['PKG_CONFIG_PATH'])
         # otherwise this variable == os.environ["PKG_CONFIG_PATH"]
 
     if env['PATH']:
-        env['ENV']['PATH'] = os.path.realpath(env['PATH']) + ':' + env['ENV']['PATH']
+        env['ENV']['PATH'] = fix_path(env['PATH']) + ':' + env['ENV']['PATH']
 
     if env['SYSTEM_FONTS']:
         if not os.path.isdir(env['SYSTEM_FONTS']):
             color_print(1,'Warning: Directory specified for SYSTEM_FONTS does not exist!')
-    #### Libraries and headers dependency checks ####
 
     # Set up for libraries and headers dependency checks
-    env['CPPPATH'] = ['#include', '#']
-    env['LIBPATH'] = ['#src']
+    env['CPPPATH'] = ['#include']
+    env['LIBPATH'] = ['#src','#src/json','#src/wkt']
 
     # set any custom cxxflags and ldflags to come first
+    if sys.platform == 'darwin' and not env['HOST']:
+        DEFAULT_CXX14_CXXFLAGS += ' -stdlib=libc++'
+        DEFAULT_CXX14_LINKFLAGS = ' -stdlib=libc++'
+    env.Append(CPPDEFINES = env['CUSTOM_DEFINES'])
+    env.Append(CXXFLAGS = DEFAULT_CXX14_CXXFLAGS)
     env.Append(CXXFLAGS = env['CUSTOM_CXXFLAGS'])
     env.Append(CFLAGS = env['CUSTOM_CFLAGS'])
+    env.Append(LINKFLAGS = DEFAULT_CXX14_LINKFLAGS)
     env.Append(LINKFLAGS = env['CUSTOM_LDFLAGS'])
 
     ### platform specific bits
@@ -1030,20 +1359,8 @@ if not preconfigured:
         thread_suffix = ''
         env.Append(LIBS = 'pthread')
 
-    # Solaris & Sun Studio settings (the `SUNCC` flag will only be
-    # set if the `CXX` option begins with `CC`)
-    SOLARIS = env['PLATFORM'] == 'SunOS'
-    env['SUNCC'] = SOLARIS and env['CXX'].startswith('CC')
-
-    # If the Sun Studio C++ compiler (`CC`) is used instead of GCC.
-    if env['SUNCC']:
-        env['CC'] = 'cc'
-        # To be compatible w/Boost everything needs to be compiled
-        # with the `-library=stlport4` flag (which needs to come
-        # before the `-o` flag).
-        env['CXX'] = 'CC -library=stlport4'
-        if env['THREADING'] == 'multi':
-            env.Append(CXXFLAGS = '-mt')
+    if env['MEMORY_MAPPED_FILE']:
+        env.Append(CPPDEFINES = '-DMAPNIK_MEMORY_MAPPED_FILE')
 
     # allow for mac osx /usr/lib/libicucore.dylib compatibility
     # requires custom supplied headers since Apple does not include them
@@ -1052,26 +1369,41 @@ if not preconfigured:
     # http://www.opensource.apple.com/tarballs/ICU/
     # then copy the headers to a location that mapnik will find
     if 'core' in env['ICU_LIB_NAME']:
-        env.Append(CXXFLAGS = '-DU_HIDE_DRAFT_API')
-        env.Append(CXXFLAGS = '-DUDISABLE_RENAMING')
+        env.Append(CPPDEFINES = '-DU_HIDE_DRAFT_API')
+        env.Append(CPPDEFINES = '-DUDISABLE_RENAMING')
         if os.path.exists(env['ICU_LIB_NAME']):
             #-sICU_LINK=" -L/usr/lib -licucore
             env['ICU_LIB_NAME'] = os.path.basename(env['ICU_LIB_NAME']).replace('.dylib','').replace('lib','')
 
     # Adding the required prerequisite library directories to the include path for
     # compiling and the library path for linking, respectively.
-    for required in ('PNG', 'JPEG', 'TIFF','PROJ','ICU', 'SQLITE'):
+    for required in ('ICU', 'SQLITE', 'HB'):
         inc_path = env['%s_INCLUDES' % required]
         lib_path = env['%s_LIBS' % required]
-        env.AppendUnique(CPPPATH = os.path.realpath(inc_path))
-        env.AppendUnique(LIBPATH = os.path.realpath(lib_path))
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
 
-    if conf.parse_config('FREETYPE_CONFIG'):
+    REQUIRED_LIBSHEADERS = [
+        ['z', 'zlib.h', True,'C'],
+        [env['ICU_LIB_NAME'],'unicode/unistr.h',True,'C++'],
+        ['harfbuzz', 'harfbuzz/hb.h',True,'C++']
+    ]
+
+    if env.get('FREETYPE_LIBS') or env.get('FREETYPE_INCLUDES'):
+        REQUIRED_LIBSHEADERS.insert(0,['freetype','ft2build.h',True,'C'])
+        if env.get('FREETYPE_INCLUDES'):
+            inc_path = env['FREETYPE_INCLUDES']
+            env.AppendUnique(CPPPATH = fix_path(inc_path))
+        if env.get('FREETYPE_LIBS'):
+            lib_path = env['FREETYPE_LIBS']
+            env.AppendUnique(LIBPATH = fix_path(lib_path))
+    elif conf.parse_config('FREETYPE_CONFIG'):
         # check if freetype links to bz2
         if env['RUNTIME_LINK'] == 'static':
             temp_env = env.Clone()
             temp_env['LIBS'] = []
             try:
+                # TODO - freetype-config accepts --static as of v2.5.3
                 temp_env.ParseConfig('%s --libs' % env['FREETYPE_CONFIG'])
                 if 'bz2' in temp_env['LIBS']:
                     env['EXTRA_FREETYPE_LIBS'].append('bz2')
@@ -1080,42 +1412,105 @@ if not preconfigured:
 
     # libxml2 should be optional but is currently not
     # https://github.com/mapnik/mapnik/issues/913
-    if conf.parse_config('XML2_CONFIG',checks='--cflags'):
-        env['HAS_LIBXML2'] = True
+    if env.get('XMLPARSER') and env['XMLPARSER'] == 'libxml2':
+        if env.get('XML2_LIBS') or env.get('XML2_INCLUDES'):
+            OPTIONAL_LIBSHEADERS.insert(0,['libxml2','libxml/parser.h',True,'C'])
+            if env.get('XML2_INCLUDES'):
+                inc_path = env['XML2_INCLUDES']
+                env.AppendUnique(CPPPATH = fix_path(inc_path))
+            if env.get('XML2_LIBS'):
+                lib_path = env['XML2_LIBS']
+                env.AppendUnique(LIBPATH = fix_path(lib_path))
+        elif conf.parse_config('XML2_CONFIG',checks='--cflags'):
+            env['HAS_LIBXML2'] = True
+        else:
+            env['MISSING_DEPS'].append('libxml2')
 
-    LIBSHEADERS = [
-        ['m', 'math.h', True,'C'],
-        ['ltdl', 'ltdl.h', True,'C'],
-        ['png', 'png.h', True,'C'],
-        ['tiff', 'tiff.h', True,'C'],
-        ['z', 'zlib.h', True,'C'],
-        ['proj', 'proj_api.h', True,'C'],
-        [env['ICU_LIB_NAME'],'unicode/unistr.h',True,'C++'],
-    ]
+    if not env['HOST']:
+        if conf.CheckHasDlfcn():
+            env.Append(CPPDEFINES = '-DMAPNIK_HAS_DLCFN')
+        else:
+            env['SKIPPED_DEPS'].extend(['dlfcn'])
+
+    OPTIONAL_LIBSHEADERS = []
 
     if env['JPEG']:
-        env.Append(CXXFLAGS = '-DHAVE_JPEG')
-        LIBSHEADERS.append(['jpeg', ['stdio.h', 'jpeglib.h'], True,'C'])
+        OPTIONAL_LIBSHEADERS.append(['jpeg', ['stdio.h', 'jpeglib.h'], False,'C','-DHAVE_JPEG'])
+        inc_path = env['%s_INCLUDES' % 'JPEG']
+        lib_path = env['%s_LIBS' % 'JPEG']
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
     else:
         env['SKIPPED_DEPS'].extend(['jpeg'])
 
+    if env['PROJ']:
+        OPTIONAL_LIBSHEADERS.append(['proj', 'proj_api.h', False,'C','-DMAPNIK_USE_PROJ4'])
+        inc_path = env['%s_INCLUDES' % 'PROJ']
+        lib_path = env['%s_LIBS' % 'PROJ']
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
+    else:
+        env['SKIPPED_DEPS'].extend(['proj'])
+
+    if env['PNG']:
+        OPTIONAL_LIBSHEADERS.append(['png', 'png.h', False,'C','-DHAVE_PNG'])
+        inc_path = env['%s_INCLUDES' % 'PNG']
+        lib_path = env['%s_LIBS' % 'PNG']
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
+    else:
+        env['SKIPPED_DEPS'].extend(['png'])
+
+    if env['WEBP']:
+        OPTIONAL_LIBSHEADERS.append(['webp', 'webp/decode.h', False,'C','-DHAVE_WEBP'])
+        inc_path = env['%s_INCLUDES' % 'WEBP']
+        lib_path = env['%s_LIBS' % 'WEBP']
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
+    else:
+        env['SKIPPED_DEPS'].extend(['webp'])
+
+    if env['TIFF']:
+        OPTIONAL_LIBSHEADERS.append(['tiff', 'tiff.h', False,'C','-DHAVE_TIFF'])
+        inc_path = env['%s_INCLUDES' % 'TIFF']
+        lib_path = env['%s_LIBS' % 'TIFF']
+        env.AppendUnique(CPPPATH = fix_path(inc_path))
+        env.AppendUnique(LIBPATH = fix_path(lib_path))
+    else:
+        env['SKIPPED_DEPS'].extend(['tiff'])
+
     # if requested, sort LIBPATH and CPPPATH before running CheckLibWithHeader tests
     if env['PRIORITIZE_LINKING']:
-        conf.prioritize_paths(silent=False)
+        conf.prioritize_paths(silent=True)
 
-    for libname, headers, required, lang in LIBSHEADERS:
-        if not conf.CheckLibWithHeader(libname, headers, lang):
-            if required:
-                color_print(1, 'Could not find required header or shared library for %s' % libname)
-                env['MISSING_DEPS'].append(libname)
+    # test for C++14 support, which is required
+    if not env['HOST'] and not conf.supports_cxx14():
+        color_print(1,"C++ compiler does not support C++14 standard (-std=c++14), which is required. Please upgrade your compiler")
+        Exit(1)
+
+    if not env['HOST']:
+        for libname, headers, required, lang in REQUIRED_LIBSHEADERS:
+            if not conf.CheckLibWithHeader(libname, headers, lang):
+                if required:
+                    color_print(1, 'Could not find required header or shared library for %s' % libname)
+                    env['MISSING_DEPS'].append(libname)
+                else:
+                    color_print(4, 'Could not find optional header or shared library for %s' % libname)
+                    env['SKIPPED_DEPS'].append(libname)
             else:
-                color_print(4, 'Could not find optional header or shared library for %s' % libname)
-                env['SKIPPED_DEPS'].append(libname)
+                if libname == env['ICU_LIB_NAME']:
+                    if env['ICU_LIB_NAME'] not in env['MISSING_DEPS']:
+                        if not conf.icu_at_least_four_two():
+                            # expression_string.cpp and map.cpp use fromUTF* function only available in >= ICU 4.2
+                            env['MISSING_DEPS'].append(env['ICU_LIB_NAME'])
+                elif libname == 'harfbuzz':
+                    if not conf.harfbuzz_version():
+                        env['SKIPPED_DEPS'].append('harfbuzz-min-version')
+                    if not conf.harfbuzz_with_freetype_support():
+                        env['MISSING_DEPS'].append('harfbuzz-with-freetype-support')
 
-    if env['ICU_LIB_NAME'] not in env['MISSING_DEPS']:
-        if not conf.icu_at_least_four_two():
-            # expression_string.cpp and map.cpp use fromUTF* function only available in >= ICU 4.2
-            env['MISSING_DEPS'].append(env['ICU_LIB_NAME'])
+    if env['BIGINT']:
+        env.Append(CPPDEFINES = '-DBIGINT')
 
     if env['THREADING'] == 'multi':
         thread_flag = thread_suffix
@@ -1124,187 +1519,282 @@ if not preconfigured:
 
     conf.FindBoost(BOOST_SEARCH_PREFIXES,thread_flag)
 
-    env['BOOST_LIB_VERSION_FROM_HEADER'] = conf.GetBoostLibVersion()
+    has_boost_devel = True
+    if not env['HOST']:
+        if not conf.CheckHeader(header='boost/version.hpp',language='C++'):
+            env['MISSING_DEPS'].append('boost development headers')
+            has_boost_devel = False
 
-    # The other required boost headers.
-    BOOST_LIBSHEADERS = [
-        ['system', 'boost/system/system_error.hpp', True],
-        ['filesystem', 'boost/filesystem/operations.hpp', True],
-        ['regex', 'boost/regex.hpp', True],
-        ['program_options', 'boost/program_options.hpp', False]
-    ]
+    if has_boost_devel:
+        if not env['HOST']:
+            env['BOOST_LIB_VERSION_FROM_HEADER'] = conf.GetBoostLibVersion()
 
-    if env['THREADING'] == 'multi':
-        BOOST_LIBSHEADERS.append(['thread', 'boost/thread/mutex.hpp', True])
-        # on solaris the configure checks for boost_thread
-        # require the -pthreads flag to be able to check for
-        # threading support, so we add as a global library instead
-        # of attaching to cxxflags after configure
-        if env['PLATFORM'] == 'SunOS':
-            env.Append(CXXFLAGS = '-pthreads')
+        # The other required boost headers.
+        BOOST_LIBSHEADERS = [
+            ['system', 'boost/system/system_error.hpp', True],
+            ['filesystem', 'boost/filesystem/operations.hpp', True],
+            ['regex', 'boost/regex.hpp', True],
+            ['program_options', 'boost/program_options.hpp', False]
+        ]
 
-    # if requested, sort LIBPATH and CPPPATH before running CheckLibWithHeader tests
-    if env['PRIORITIZE_LINKING']:
-        conf.prioritize_paths()
+        # if requested, sort LIBPATH and CPPPATH before running CheckLibWithHeader tests
+        if env['PRIORITIZE_LINKING']:
+            conf.prioritize_paths(silent=True)
 
-    # if the user is not setting custom boost configuration
-    # enforce boost version greater than or equal to BOOST_MIN_VERSION
-    if not conf.CheckBoost(BOOST_MIN_VERSION):
-        color_print(4,'Found boost lib version... %s' % env.get('BOOST_LIB_VERSION_FROM_HEADER') )
-        color_print(1,'Boost version %s or greater is required' % BOOST_MIN_VERSION)
-        if not env['BOOST_VERSION']:
-            env['MISSING_DEPS'].append('boost version >=%s' % BOOST_MIN_VERSION)
-    else:
-        color_print(4,'Found boost lib version... %s' % env.get('BOOST_LIB_VERSION_FROM_HEADER') )
-
-    for count, libinfo in enumerate(BOOST_LIBSHEADERS):
-        if not conf.CheckLibWithHeader('boost_%s%s' % (libinfo[0],env['BOOST_APPEND']), libinfo[1], 'C++'):
-            if libinfo[2]:
-                color_print(1,'Could not find required header or shared library for boost %s' % libinfo[0])
-                env['MISSING_DEPS'].append('boost ' + libinfo[0])
+        if not env['HOST']:
+            # if the user is not setting custom boost configuration
+            # enforce boost version greater than or equal to BOOST_MIN_VERSION
+            if not conf.CheckBoost(BOOST_MIN_VERSION):
+                color_print(4,'Found boost lib version... %s' % env.get('BOOST_LIB_VERSION_FROM_HEADER') )
+                color_print(1,'Boost version %s or greater is required' % BOOST_MIN_VERSION)
+                if not env['BOOST_VERSION']:
+                    env['MISSING_DEPS'].append('boost version >= %s' % BOOST_MIN_VERSION)
             else:
-                color_print(4,'Could not find optional header or shared library for boost %s' % libinfo[0])
-                env['SKIPPED_DEPS'].append('boost ' + libinfo[0])
+                color_print(4,'Found boost lib version... %s' % env.get('BOOST_LIB_VERSION_FROM_HEADER') )
 
-    if env['ICU_LIB_NAME'] not in env['MISSING_DEPS']:
+        if not env['HOST']:
+            for count, libinfo in enumerate(BOOST_LIBSHEADERS):
+                if not conf.CheckLibWithHeader('boost_%s%s' % (libinfo[0],env['BOOST_APPEND']), libinfo[1], 'C++'):
+                    if libinfo[2]:
+                        color_print(1,'Could not find required header or shared library for boost %s' % libinfo[0])
+                        env['MISSING_DEPS'].append('boost ' + libinfo[0])
+                    else:
+                        color_print(4,'Could not find optional header or shared library for boost %s' % libinfo[0])
+                        env['SKIPPED_DEPS'].append('boost ' + libinfo[0])
+
+        # Boost versions before 1.57 are broken when the system package and
+        # Mapnik are compiled against different standards. On Ubuntu 14.04
+        # using boost 1.54, it breaks scoped enums. It's a bit of a hack to
+        # just turn it off like this, but seems the only available work-
+        # around. See https://svn.boost.org/trac/boost/ticket/6779 for more
+        # details.
+        if not env['HOST']:
+            boost_version = [int(x) for x in env.get('BOOST_LIB_VERSION_FROM_HEADER').split('_')]
+            if not conf.CheckBoostScopedEnum():
+                if boost_version < [1, 51]:
+                    env.Append(CXXFLAGS = '-DBOOST_NO_SCOPED_ENUMS')
+                elif boost_version < [1, 57]:
+                    env.Append(CXXFLAGS = '-DBOOST_NO_CXX11_SCOPED_ENUMS')
+
+    if not env['HOST'] and env['ICU_LIB_NAME'] not in env['MISSING_DEPS']:
         # http://lists.boost.org/Archives/boost/2009/03/150076.php
+        # we need libicui18n if using static boost libraries, so it is
+        # important to try this check with the library linked
         if conf.boost_regex_has_icu():
             # TODO - should avoid having this be globally defined...
-            env.Append(CXXFLAGS = '-DBOOST_REGEX_HAS_ICU')
+            env.Append(CPPDEFINES = '-DBOOST_REGEX_HAS_ICU')
         else:
             env['SKIPPED_DEPS'].append('boost_regex_icu')
 
+        for libname, headers, required, lang, define in OPTIONAL_LIBSHEADERS:
+            if not env['HOST']:
+                if not conf.CheckLibWithHeader(libname, headers, lang):
+                    if required:
+                        color_print(1, 'Could not find required header or shared library for %s' % libname)
+                        env['MISSING_DEPS'].append(libname)
+                    else:
+                        color_print(4, 'Could not find optional header or shared library for %s' % libname)
+                        env['SKIPPED_DEPS'].append(libname)
+                else:
+                    env.Append(CPPDEFINES = define)
+            else:
+                env.Append(CPPDEFINES = define)
+
     env['REQUESTED_PLUGINS'] = [ driver.strip() for driver in Split(env['INPUT_PLUGINS'])]
 
+    SQLITE_HAS_RTREE = None
+    if env['HOST']:
+        SQLITE_HAS_RTREE = True
+
+    if not env['HOST']:
+        env['QUERIED_PROJ_LIB'] = conf.CheckProjData()
+        if os.environ.get('PROJ_LIB'):
+            env['QUERIED_PROJ_LIB'] = os.environ['PROJ_LIB']
+            color_print(4,'Detected PROJ_LIB in environ, using env value instead: %s' % os.environ['PROJ_LIB'] )
+        env['QUERIED_ICU_DATA'] = conf.CheckIcuData()
+        if os.environ.get('ICU_DATA'):
+            env['QUERIED_ICU_DATA'] = os.environ['ICU_DATA']
+            color_print(4,'Detected ICU_DATA in environ, using env value instead: %s' % os.environ['ICU_DATA'] )
+        env['QUERIED_GDAL_DATA'] = conf.CheckGdalData()
+        if os.environ.get('GDAL_DATA'):
+            env['QUERIED_GDAL_DATA'] = os.environ['GDAL_DATA']
+            color_print(4,'Detected GDAL_DATA in environ, using env value instead: %s' % os.environ['GDAL_DATA'] )
+        # now validate the paths actually exist
+        if env['QUERIED_PROJ_LIB'] and not os.path.exists(env['QUERIED_PROJ_LIB']):
+            color_print(1,'%s not detected on your system' % env['QUERIED_PROJ_LIB'] )
+            env['MISSING_DEPS'].append('PROJ_LIB')
+        if env['QUERIED_GDAL_DATA'] and not os.path.exists(env['QUERIED_GDAL_DATA']):
+            color_print(1,'%s not detected on your system' % env['QUERIED_GDAL_DATA'] )
+            env['MISSING_DEPS'].append('GDAL_DATA')
+        if env['QUERIED_ICU_DATA'] and not os.path.exists(env['QUERIED_ICU_DATA']):
+            color_print(1,'%s not detected on your system' % env['QUERIED_ICU_DATA'] )
+            env['MISSING_DEPS'].append('ICU_DATA')
+
+
+    CHECK_PKG_CONFIG = conf.CheckPKGConfig('0.15.0')
+
     if len(env['REQUESTED_PLUGINS']):
-        color_print(4,'Checking for requested plugins dependencies...')
-        for plugin in env['REQUESTED_PLUGINS']:
-            details = env['PLUGINS'][plugin]
-            if plugin == 'gdal':
-                if conf.parse_config('GDAL_CONFIG',checks='--libs'):
-                    conf.parse_config('GDAL_CONFIG',checks='--cflags')
-                    libname = conf.get_pkg_lib('GDAL_CONFIG','gdal')
-                    if libname:
-                        details['lib'] = libname
-            elif plugin == 'postgis':
-                conf.parse_pg_config('PG_CONFIG')
-            elif plugin == 'ogr':
-                if conf.ogr_enabled():
-                    if not 'gdal' in env['REQUESTED_PLUGINS']:
-                        conf.parse_config('GDAL_CONFIG',checks='--libs')
+        if env['HOST']:
+            for plugin in env['REQUESTED_PLUGINS']:
+                details = env['PLUGINS'][plugin]
+                if details['lib']:
+                    env.AppendUnique(LIBS=details['lib'])
+        else:
+            color_print(4,'Checking for requested plugins dependencies...')
+            for plugin in env['REQUESTED_PLUGINS']:
+                details = env['PLUGINS'][plugin]
+                if plugin == 'gdal':
+                    if conf.parse_config('GDAL_CONFIG',checks='--libs'):
                         conf.parse_config('GDAL_CONFIG',checks='--cflags')
-                    libname = conf.get_pkg_lib('GDAL_CONFIG','ogr')
-                    if libname:
-                        details['lib'] = libname
-            elif plugin == 'geos':
-                if conf.parse_config('GEOS_CONFIG',checks='--ldflags --cflags'):
-                    lgeos_c = env['PLUGINS']['geos']['lib']
-                    env.Append(LIBS = lgeos_c)
-
-            elif details['path'] and details['lib'] and details['inc']:
-                backup = env.Clone().Dictionary()
-                # Note, the 'delete_existing' keyword makes sure that these paths are prepended
-                # to the beginning of the path list even if they already exist
-                incpath = env['%s_INCLUDES' % details['path']]
-                libpath = env['%s_LIBS' % details['path']]
-                env.PrependUnique(CPPPATH = os.path.realpath(incpath),delete_existing=True)
-                env.PrependUnique(LIBPATH = os.path.realpath(libpath),delete_existing=True)
-                if not conf.CheckLibWithHeader(details['lib'], details['inc'], details['lang']):
-                    env.Replace(**backup)
-                    env['SKIPPED_DEPS'].append(details['lib'])
-                if plugin == 'sqlite':
-                    sqlite_backup = env.Clone().Dictionary()
-
-                    # if statically linking, on linux we likely
-                    # need to link sqlite to pthreads and dl
-                    if env['RUNTIME_LINK'] == 'static':
-                        if conf.CheckPKGConfig('0.15.0') and conf.CheckPKG('sqlite3'):
-                            sqlite_env = env.Clone()
-                            try:
-                                sqlite_env.ParseConfig('pkg-config --static --libs sqlite3')
-                                for lib in sqlite_env['LIBS']:
-                                    if not lib in env['LIBS']:
-                                        env["SQLITE_LINKFLAGS"].append(lib)
-                                        env.Append(LIBS=lib)
-                            except OSError,e:
-                                pass
-
-                    if not conf.sqlite_has_rtree():
-                        env.Replace(**sqlite_backup)
-                        if details['lib'] in env['LIBS']:
-                            env['LIBS'].remove(details['lib'])
-                        env['SKIPPED_DEPS'].append('sqlite_rtree')
+                        libname = conf.get_pkg_lib('GDAL_CONFIG','gdal')
+                        if libname:
+                            if not conf.CheckLibWithHeader(libname, details['inc'], details['lang']):
+                                env['SKIPPED_DEPS'].append('gdal')
+                                if libname in env['LIBS']:
+                                     env['LIBS'].remove(libname)
+                            else:
+                                details['lib'] = libname
+                elif plugin == 'postgis' or plugin == 'pgraster':
+                    if env.get('PG_LIBS') or env.get('PG_INCLUDES'):
+                        libname = details['lib']
+                        if env.get('PG_INCLUDES'):
+                            inc_path = env['PG_INCLUDES']
+                            env.AppendUnique(CPPPATH = fix_path(inc_path))
+                        if env.get('PG_LIBS'):
+                            lib_path = env['PG_LIBS']
+                            env.AppendUnique(LIBPATH = fix_path(lib_path))
+                        if not conf.CheckLibWithHeader(libname, details['inc'], details['lang']):
+                            env['SKIPPED_DEPS'].append(libname)
+                            if libname in env['LIBS']:
+                                 env['LIBS'].remove(libname)
+                        else:
+                            details['lib'] = libname
                     else:
-                        env.Replace(**sqlite_backup)
+                        conf.parse_pg_config('PG_CONFIG')
+                elif plugin == 'ogr':
+                    if conf.ogr_enabled():
+                        if conf.parse_config('GDAL_CONFIG',checks='--libs'):
+                            conf.parse_config('GDAL_CONFIG',checks='--cflags')
+                            libname = conf.get_pkg_lib('GDAL_CONFIG','ogr')
+                            if libname:
+                                if not conf.CheckLibWithHeader(libname, details['inc'], details['lang']):
+                                    if 'gdal' not in env['SKIPPED_DEPS']:
+                                        env['SKIPPED_DEPS'].append('gdal')
+                                    if libname in env['LIBS']:
+                                         env['LIBS'].remove(libname)
+                                else:
+                                    details['lib'] = libname
+                elif details['path'] and details['lib'] and details['inc']:
+                    backup = env.Clone().Dictionary()
+                    # Note, the 'delete_existing' keyword makes sure that these paths are prepended
+                    # to the beginning of the path list even if they already exist
+                    incpath = env['%s_INCLUDES' % details['path']]
+                    libpath = env['%s_LIBS' % details['path']]
+                    env.PrependUnique(CPPPATH = fix_path(incpath),delete_existing=True)
+                    env.PrependUnique(LIBPATH = fix_path(libpath),delete_existing=True)
+                    if not conf.CheckLibWithHeader(details['lib'], details['inc'], details['lang']):
+                        env.Replace(**backup)
+                        env['SKIPPED_DEPS'].append(details['lib'])
+                    if plugin == 'sqlite':
+                        sqlite_backup = env.Clone().Dictionary()
+                        # if statically linking, on linux we likely
+                        # need to link sqlite to pthreads and dl
+                        if env['RUNTIME_LINK'] == 'static' and not env['PLATFORM'] == 'Darwin':
+                            if CHECK_PKG_CONFIG and conf.CheckPKG('sqlite3'):
+                                sqlite_env = env.Clone()
+                                try:
+                                    sqlite_env.ParseConfig('pkg-config --static --libs sqlite3')
+                                    for lib in sqlite_env['LIBS']:
+                                        if not lib in env['LIBS']:
+                                            env["SQLITE_LINKFLAGS"].append(lib)
+                                            env.Append(LIBS=lib)
+                                except OSError,e:
+                                    for lib in ["sqlite3","dl","pthread"]:
+                                        if not lib in env['LIBS']:
+                                            env["SQLITE_LINKFLAGS"].append("lib")
+                                            env.Append(LIBS=lib)
+                            else:
+                                for lib in ["sqlite3","dl","pthread"]:
+                                    if not lib in env['LIBS']:
+                                        env["SQLITE_LINKFLAGS"].append("lib")
+                                        env.Append(LIBS=lib)
+                        SQLITE_HAS_RTREE = conf.sqlite_has_rtree()
+                        if not SQLITE_HAS_RTREE:
+                            env.Replace(**sqlite_backup)
+                            if details['lib'] in env['LIBS']:
+                                env['LIBS'].remove(details['lib'])
+                            env['SKIPPED_DEPS'].append('sqlite_rtree')
+                        else:
+                            env.Replace(**sqlite_backup)
+                elif details['lib'] and details['inc']:
+                    if not conf.CheckLibWithHeader(details['lib'], details['inc'], details['lang']):
+                        env['SKIPPED_DEPS'].append(details['lib'])
 
-            elif details['lib'] and details['inc']:
-                if not conf.CheckLibWithHeader(details['lib'], details['inc'], details['lang']):
-                    env['SKIPPED_DEPS'].append(details['lib'])
+            # re-append the local paths for mapnik sources to the beginning of the list
+            # to make sure they come before any plugins that were 'prepended'
+            env.PrependUnique(CPPPATH = '#include', delete_existing=True)
+            env.PrependUnique(LIBPATH = '#src', delete_existing=True)
 
-        # re-append the local paths for mapnik sources to the beginning of the list
-        # to make sure they come before any plugins that were 'prepended'
-        env.PrependUnique(CPPPATH = '#include', delete_existing=True)
-        env.PrependUnique(CPPPATH = '#', delete_existing=True)
-        env.PrependUnique(LIBPATH = '#src', delete_existing=True)
-
-    if env['PGSQL2SQLITE']:
-        if not conf.sqlite_has_rtree():
-            env['SKIPPED_DEPS'].append('pgsql2sqlite_rtree')
-            env['PGSQL2SQLITE'] = False
+    if not env['HOST']:
+        if env['PGSQL2SQLITE']:
+            if 'sqlite3' not in env['LIBS']:
+                env.AppendUnique(LIBS='sqlite3')
+                env.AppendUnique(CPPPATH = fix_path(env['SQLITE_INCLUDES']))
+                env.AppendUnique(LIBPATH = fix_path(env['SQLITE_LIBS']))
+            if 'pq' not in env['LIBS']:
+                if not conf.parse_pg_config('PG_CONFIG'):
+                    env['PGSQL2SQLITE'] = False
+            if not SQLITE_HAS_RTREE:
+                env['SKIPPED_DEPS'].append('pgsql2sqlite_rtree')
+                env['PGSQL2SQLITE'] = False
 
     # we rely on an internal, patched copy of agg with critical fixes
     # prepend to make sure we link locally
     env.Prepend(CPPPATH = '#deps/agg/include')
     env.Prepend(LIBPATH = '#deps/agg')
+    env.Prepend(CPPPATH = '#deps/mapbox/variant/include')
+    env.Prepend(CPPPATH = '#deps/mapbox/geometry/include')
+    env.Prepend(CPPPATH = '#deps/mapbox/protozero/include')
+    # prepend deps dir for auxillary headers
+    env.Prepend(CPPPATH = '#deps')
 
     if env['CAIRO']:
         if env['CAIRO_LIBS'] or env['CAIRO_INCLUDES']:
             c_inc = env['CAIRO_INCLUDES']
             if env['CAIRO_LIBS']:
-                env["CAIROMM_LIBPATHS"].append(os.path.realpath(env['CAIRO_LIBS']))
+                env["CAIRO_LIBPATHS"].append(fix_path(env['CAIRO_LIBS']))
                 if not env['CAIRO_INCLUDES']:
                     c_inc = env['CAIRO_LIBS'].replace('lib','',1)
             if c_inc:
-                c_inc = os.path.normpath(os.path.realpath(env['CAIRO_INCLUDES']))
+                c_inc = os.path.normpath(fix_path(env['CAIRO_INCLUDES']))
                 if c_inc.endswith('include'):
                     c_inc = os.path.dirname(c_inc)
-                env["CAIROMM_CPPPATHS"].extend(
+                env["CAIRO_CPPPATHS"].extend(
                     [
-                      os.path.join(c_inc,'include/cairomm-1.0'),
-                      os.path.join(c_inc,'lib/cairomm-1.0/include'),
                       os.path.join(c_inc,'include/cairo'),
-                      os.path.join(c_inc,'include/sigc++-2.0'),
-                      os.path.join(c_inc,'lib/sigc++-2.0/include'),
                       os.path.join(c_inc,'include/pixman-1'),
                       #os.path.join(c_inc,'include/freetype2'),
                       #os.path.join(c_inc,'include/libpng'),
                     ]
                 )
-                env["CAIROMM_LINKFLAGS"] = ['cairo','cairomm-1.0']
+                env["CAIRO_ALL_LIBS"] = ['cairo']
                 if env['RUNTIME_LINK'] == 'static':
-                    env["CAIROMM_LINKFLAGS"].extend(
-                        ['sigc-2.0','pixman-1','expat','fontconfig','iconv']
+                    env["CAIRO_ALL_LIBS"].extend(
+                        ['pixman-1']
                     )
                 # todo - run actual checkLib?
                 env['HAS_CAIRO'] = True
         else:
-            if not conf.CheckPKGConfig('0.15.0'):
+            if not CHECK_PKG_CONFIG:
                 env['HAS_CAIRO'] = False
                 env['SKIPPED_DEPS'].append('pkg-config')
                 env['SKIPPED_DEPS'].append('cairo')
-                env['SKIPPED_DEPS'].append('cairomm')
             elif not conf.CheckPKG('cairo'):
                 env['HAS_CAIRO'] = False
                 env['SKIPPED_DEPS'].append('cairo')
-            elif not conf.CheckPKG('cairomm-1.0'):
-                env['HAS_CAIRO'] = False
-                env['SKIPPED_DEPS'].append('cairomm')
-            elif not conf.CheckPKGVersion('cairomm-1.0',CAIROMM_MIN_VERSION):
-                env['HAS_CAIRO'] = False
-                env['SKIPPED_DEPS'].append('cairomm-version')
             else:
-                print 'Checking for cairo/cairomm lib and include paths... ',
-                cmd = 'pkg-config --libs --cflags cairomm-1.0'
+                print 'Checking for cairo lib and include paths... ',
+                cmd = 'pkg-config --libs --cflags cairo'
                 if env['RUNTIME_LINK'] == 'static':
                     cmd += ' --static'
                 cairo_env = env.Clone()
@@ -1312,108 +1802,34 @@ if not preconfigured:
                     cairo_env.ParseConfig(cmd)
                     for lib in cairo_env['LIBS']:
                         if not lib in env['LIBS']:
-                            env["CAIROMM_LINKFLAGS"].append(lib)
+                            env["CAIRO_ALL_LIBS"].append(lib)
                     for lpath in cairo_env['LIBPATH']:
                         if not lpath in env['LIBPATH']:
-                            env["CAIROMM_LIBPATHS"].append(lpath)
+                            env["CAIRO_LIBPATHS"].append(lpath)
                     for inc in cairo_env['CPPPATH']:
                         if not inc in env['CPPPATH']:
-                            env["CAIROMM_CPPPATHS"].append(inc)
+                            env["CAIRO_CPPPATHS"].append(inc)
                     env['HAS_CAIRO'] = True
                     print 'yes'
                 except OSError,e:
                     color_print(1,'no')
                     env['SKIPPED_DEPS'].append('cairo')
-                    env['SKIPPED_DEPS'].append('cairomm')
                     color_print(1,'pkg-config reported: %s' % e)
 
     else:
         color_print(4,'Not building with cairo support, pass CAIRO=True to enable')
 
-    if 'python' in env['BINDINGS']:
-        if not os.access(env['PYTHON'], os.X_OK):
-            color_print(1,"Cannot run python interpreter at '%s', make sure that you have the permissions to execute it." % env['PYTHON'])
-            Exit(1)
-
-        py3 = 'True' in os.popen('''%s -c "import sys as s;s.stdout.write(str(s.version_info[0] == 3))"''' % env['PYTHON']).read().strip()
-
-        if py3:
-            sys_prefix = '''%s -c "import sys; print(sys.prefix)"''' % env['PYTHON']
-        else:
-            sys_prefix = '''%s -c "import sys; print sys.prefix"''' % env['PYTHON']
-        env['PYTHON_SYS_PREFIX'] = call(sys_prefix)
-
-        if HAS_DISTUTILS:
-            if py3:
-                sys_version = '''%s -c "from distutils.sysconfig import get_python_version; print(get_python_version())"''' % env['PYTHON']
-            else:
-                sys_version = '''%s -c "from distutils.sysconfig import get_python_version; print get_python_version()"''' % env['PYTHON']
-            env['PYTHON_VERSION'] = call(sys_version)
-
-            if py3:
-                py_includes = '''%s -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())"''' % env['PYTHON']
-            else:
-                py_includes = '''%s -c "from distutils.sysconfig import get_python_inc; print get_python_inc()"''' % env['PYTHON']
-            env['PYTHON_INCLUDES'] = call(py_includes)
-
-            # Note: we use the plat_specific argument here to make sure to respect the arch-specific site-packages location
-            if py3:
-                site_packages = '''%s -c "from distutils.sysconfig import get_python_lib; print(get_python_lib(plat_specific=True))"''' % env['PYTHON']
-            else:
-                site_packages = '''%s -c "from distutils.sysconfig import get_python_lib; print get_python_lib(plat_specific=True)"''' % env['PYTHON']
-            env['PYTHON_SITE_PACKAGES'] = call(site_packages)
-        else:
-            env['PYTHON_SYS_PREFIX'] = os.popen('''%s -c "import sys; print sys.prefix"''' % env['PYTHON']).read().strip()
-            env['PYTHON_VERSION'] = os.popen('''%s -c "import sys; print sys.version"''' % env['PYTHON']).read()[0:3]
-            env['PYTHON_INCLUDES'] = env['PYTHON_SYS_PREFIX'] + '/include/python' + env['PYTHON_VERSION']
-            env['PYTHON_SITE_PACKAGES'] = env['DESTDIR'] + os.path.sep + env['PYTHON_SYS_PREFIX'] + os.path.sep + env['LIBDIR_SCHEMA'] + '/python' + env['PYTHON_VERSION'] + '/site-packages/'
-
-        # if user-requested custom prefix fall back to manual concatenation for building subdirectories
-        if env['PYTHON_PREFIX']:
-            py_relative_install = env['LIBDIR_SCHEMA'] + '/python' + env['PYTHON_VERSION'] + '/site-packages/'
-            env['PYTHON_INSTALL_LOCATION'] = env['DESTDIR'] + os.path.sep + env['PYTHON_PREFIX'] + os.path.sep +  py_relative_install
-        else:
-            env['PYTHON_INSTALL_LOCATION'] = env['DESTDIR'] + os.path.sep + env['PYTHON_SITE_PACKAGES']
-
-        if py3:
-            is_64_bit = '''%s -c "import sys; print(sys.maxsize == 9223372036854775807)"''' % env['PYTHON']
-        else:
-            is_64_bit = '''%s -c "import sys; print sys.maxint == 9223372036854775807"''' % env['PYTHON']
-
-        if is_64_bit:
-            env['PYTHON_IS_64BIT'] = True
-        else:
-            env['PYTHON_IS_64BIT'] = False
-
-        if py3 and env['BOOST_PYTHON_LIB'] == 'boost_python':
-            env['BOOST_PYTHON_LIB'] = 'boost_python3%s' % env['BOOST_APPEND']
-        elif env['BOOST_PYTHON_LIB'] == 'boost_python':
-            env['BOOST_PYTHON_LIB'] = 'boost_python%s' % env['BOOST_APPEND']
-
-        if not conf.CheckHeader(header='boost/python/detail/config.hpp',language='C++'):
-            color_print(1,'Could not find required header files for boost python')
-            env['MISSING_DEPS'].append('boost python')
-
-        if not conf.CheckLibWithHeader(libs=[env['BOOST_PYTHON_LIB'],'python%s' % env['PYTHON_VERSION']], header='boost/python/detail/config.hpp', language='C++'):
-            color_print(1, 'Could not find library "%s" for boost python bindings' % env['BOOST_PYTHON_LIB'])
-            # failing on launchpad, so let's make it a warning for now
-            #env['MISSING_DEPS'].append('boost python')
-
-        if env['CAIRO']:
-            if conf.CheckPKGConfig('0.15.0') and conf.CheckPKG('pycairo'):
-                env['HAS_PYCAIRO'] = True
-            else:
-                env['SKIPPED_DEPS'].extend(['pycairo'])
-        else:
-            color_print(4,'Not building with pycairo support, pass CAIRO=True to enable')
-
+    if not env['HOST'] and env['HAS_CAIRO']:
+        if not conf.CheckCairoHasFreetype():
+            env['SKIPPED_DEPS'].append('cairo')
+            env['HAS_CAIRO'] = False
 
     #### End Config Stage for Required Dependencies ####
 
     if env['MISSING_DEPS']:
         # if required dependencies are missing, print warnings and then let SCons finish without building or saving local config
         color_print(1,'\nExiting... the following required dependencies were not found:\n   - %s' % '\n   - '.join([pretty_dep(dep) for dep in env['MISSING_DEPS']]))
-        color_print(1,"\nSee '%s' for details on possible problems." % (os.path.realpath(SCONS_LOCAL_LOG)))
+        color_print(1,"\nSee '%s' for details on possible problems." % (fix_path(SCONS_LOCAL_LOG)))
         if env['SKIPPED_DEPS']:
             color_print(4,'\nAlso, these OPTIONAL dependencies were not found:\n   - %s' % '\n   - '.join([pretty_dep(dep) for dep in env['SKIPPED_DEPS']]))
         color_print(4,"\nSet custom paths to these libraries and header files on the command-line or in a file called '%s'" % SCONS_LOCAL_CONFIG)
@@ -1422,7 +1838,7 @@ if not preconfigured:
         color_print(4,"    $ sudo python scons/scons.py install")
         color_print(4,"\nTo view available path variables:\n    $ python scons/scons.py --help or -h")
         color_print(4,'\nTo view overall SCons help options:\n    $ python scons/scons.py --help-options or -H\n')
-        color_print(4,'More info: http://trac.mapnik.org/wiki/MapnikInstallation')
+        color_print(4,'More info: https://github.com/mapnik/mapnik/wiki/Mapnik-Installation')
         if not HELP_REQUESTED:
             Exit(1)
     else:
@@ -1442,46 +1858,52 @@ if not preconfigured:
           color_print(4,"Did not use user config file, no custom path variables will be saved...")
 
         if env['SKIPPED_DEPS']:
-            color_print(3,'\nNote: will build without these OPTIONAL dependencies:\n   - %s' % '\n   - '.join([pretty_dep(dep) for dep in env['SKIPPED_DEPS']]))
+            color_print(4,'\nNote: will build without these OPTIONAL dependencies:\n   - %s' % '\n   - '.join([pretty_dep(dep) for dep in env['SKIPPED_DEPS']]))
             print
 
         # fetch the mapnik version header in order to set the
         # ABI version used to build libmapnik.so on linux in src/build.py
-        abi = conf.GetMapnikLibVersion()
-        abi_fallback = "2.0.1-pre"
-        if not abi:
-            color_print(1,'Problem encountered parsing mapnik version, falling back to %s' % abi_fallback)
-            abi = abi_fallback
-
-        env['ABI_VERSION'] = abi.replace('-pre','').split('.')
+        abi = GetMapnikLibVersion()
+        abi_split = abi.split('.')
+        env['ABI_VERSION'] = abi_split
         env['MAPNIK_VERSION_STRING'] = abi
+        env['MAPNIK_VERSION'] = str(int(abi_split[0])*100000+int(abi_split[1])*100+int(abi_split[2]))
 
-        # Common C++ flags.
+        # Common DEFINES.
+        env.Append(CPPDEFINES = '-D%s' % env['PLATFORM'].upper())
         if env['THREADING'] == 'multi':
-            common_cxx_flags = '-D%s -DBOOST_SPIRIT_THREADSAFE -DMAPNIK_THREADSAFE ' % env['PLATFORM'].upper()
-        else :
-            common_cxx_flags = '-D%s ' % env['PLATFORM'].upper()
+            env.Append(CPPDEFINES = '-DMAPNIK_THREADSAFE')
+
+        if env['NO_ATEXIT']:
+            env.Append(CPPDEFINES = '-DMAPNIK_NO_ATEXIT')
+
+        if env['NO_DLCLOSE'] or env['COVERAGE']:
+            env.Append(CPPDEFINES = '-DMAPNIK_NO_DLCLOSE')
+
+        if env['ENABLE_GLIBC_WORKAROUND']:
+            env.Append(CPPDEFINES = '-DMAPNIK_ENABLE_GLIBC_WORKAROUND')
 
         # Mac OSX (Darwin) special settings
         if env['PLATFORM'] == 'Darwin':
             pthread = ''
-            # Getting the macintosh version number, sticking as a compiler macro
-            # for Leopard -- needed because different workarounds are needed than
-            # for Tiger.
-            # this was used for fribidi - not longer needed
-            # but will retain logic for future use
-            #if platform.mac_ver()[0].startswith('10.5'):
-            #    common_cxx_flags += '-DOSX_LEOPARD '
         else:
             pthread = '-pthread'
 
         # Common debugging flags.
         # http://lists.fedoraproject.org/pipermail/devel/2010-November/144952.html
-        debug_flags  = '-g -fno-omit-frame-pointer -DDEBUG -DMAPNIK_DEBUG'
-        ndebug_flags = '-DNDEBUG'
+        debug_flags  = ['-g', '-fno-omit-frame-pointer']
+        debug_defines = ['-DDEBUG', '-DMAPNIK_DEBUG']
+        ndebug_defines = ['-DNDEBUG']
+
+        # faster compile
+        # http://www.boost.org/doc/libs/1_47_0/libs/spirit/doc/html/spirit/what_s_new/spirit_2_5.html#spirit.what_s_new.spirit_2_5.breaking_changes
+        env.Append(CPPDEFINES = '-DBOOST_SPIRIT_NO_PREDEFINED_TERMINALS=1')
+        env.Append(CPPDEFINES = '-DBOOST_PHOENIX_NO_PREDEFINED_TERMINALS=1')
+        # c++11 support / https://github.com/mapnik/mapnik/issues/1683
+        #  - upgrade to PHOENIX_V3 since that is needed for c++11 compile
+        env.Append(CPPDEFINES = '-DBOOST_SPIRIT_USE_PHOENIX_V3=1')
 
         # Enable logging in debug mode (always) and release mode (when specified)
-        severities = ['info', 'debug', 'warn', 'error', 'fatal', 'none']
         if env['DEFAULT_LOG_SEVERITY']:
             if env['DEFAULT_LOG_SEVERITY'] not in severities:
                 severities_list = ', '.join(["'%s'" % s for s in severities])
@@ -1494,67 +1916,52 @@ if not preconfigured:
             color_print(1,"No logger severity specified, available options are %s." % severities_list)
             Exit(1)
 
-        log_enabled = ' -DMAPNIK_LOG -DMAPNIK_DEFAULT_LOG_SEVERITY=%d' % log_severity
+        log_enabled = ['-DMAPNIK_LOG', '-DMAPNIK_DEFAULT_LOG_SEVERITY=%d' % log_severity]
 
         if env['DEBUG']:
-            debug_flags += log_enabled
+            debug_defines += log_enabled
         else:
             if env['ENABLE_LOG']:
-                ndebug_flags += log_enabled
+                ndebug_defines += log_enabled
 
         # Enable statistics reporting
         if env['ENABLE_STATS']:
-            debug_flags += ' -DMAPNIK_STATS'
-            ndebug_flags += ' -DMAPNIK_STATS'
+            debug_defines.append('-DMAPNIK_STATS')
+            ndebug_defines.append('-DMAPNIK_STATS')
 
         # Add rdynamic to allow using statics between application and plugins
         # http://stackoverflow.com/questions/8623657/multiple-instances-of-singleton-across-shared-libraries-on-linux
         if env['PLATFORM'] != 'Darwin' and env['CXX'] == 'g++':
             env.MergeFlags('-rdynamic')
 
-        # Customizing the C++ compiler flags depending on:
-        #  (1) the C++ compiler used; and
-        #  (2) whether debug binaries are requested.
-        if env['SUNCC']:
-            if env['DEBUG']:
-                env.Append(CXXFLAGS = common_cxx_flags + debug_flags)
-            else:
-                env.Append(CXXFLAGS = common_cxx_flags + '-O %s' % ndebug_flags)
+        if env['DEBUG']:
+            env.Append(CXXFLAGS = debug_flags)
+            env.Append(CPPDEFINES = debug_defines)
         else:
-            # Common flags for GCC.
-            gcc_cxx_flags = '-ansi -Wall %s %s -ftemplate-depth-300 %s' % (env['WARNING_CXXFLAGS'], pthread, common_cxx_flags)
-            if env['DEBUG']:
-                env.Append(CXXFLAGS = gcc_cxx_flags + '-O0 -fno-inline %s' % debug_flags)
-            else:
-                env.Append(CXXFLAGS = gcc_cxx_flags + '-O%s -fno-strict-aliasing -finline-functions -Wno-inline -Wno-parentheses -Wno-char-subscripts %s' % (env['OPTIMIZATION'],ndebug_flags))
+            env.Append(CPPDEFINES = ndebug_defines)
 
-            if env['DEBUG_UNDEFINED']:
-                env.Append(CXXFLAGS = '-fcatch-undefined-behavior -ftrapv -fwrapv')
+        # Common flags for g++/clang++ CXX compiler.
+        # TODO: clean up code more to make -Wextra -Wsign-compare -Wsign-conversion -Wconversion viable
+        # -Wfloat-equal -Wold-style-cast -Wexit-time-destructors -Wglobal-constructors -Wreserved-id-macro -Wheader-hygiene -Wmissing-noreturn
+        common_cxx_flags = '-fvisibility=hidden -fvisibility-inlines-hidden -Wall %s %s -ftemplate-depth-300 -Wsign-compare ' % (env['WARNING_CXXFLAGS'], pthread)
 
-        if 'python' in env['BINDINGS']:
-            majver, minver = env['PYTHON_VERSION'].split('.')
-            # we don't want the includes it in the main environment...
-            # as they are later set in the python build.py
-            # ugly hack needed until we have env specific conf
-            backup = env.Clone().Dictionary()
-            env.AppendUnique(CPPPATH = os.path.realpath(env['PYTHON_INCLUDES']))
+        if 'clang++' in env['CXX']:
+            common_cxx_flags += ' -Wno-unsequenced  -Wtautological-compare -Wheader-hygiene '
+        if env['DEBUG']:
+            env.Append(CXXFLAGS = common_cxx_flags + '-O0')
+        else:
+            env.Append(CXXFLAGS = common_cxx_flags + '-O%s' % (env['OPTIMIZATION']))
+        if env['DEBUG_UNDEFINED']:
+            env.Append(CXXFLAGS = '-fsanitize=undefined-trap -fsanitize-undefined-trap-on-error -ftrapv -fwrapv')
 
-            if not conf.CheckHeader(header='Python.h',language='C'):
-                color_print(1,'Could not find required header files for the Python language (version %s)' % env['PYTHON_VERSION'])
-                Exit(1)
+        if env['DEBUG_SANITIZE']:
+            env.Append(CXXFLAGS = ['-fsanitize=address','-fno-omit-frame-pointer'])
+            env.Append(LINKFLAGS = ['-fsanitize=address'])
 
-            if (int(majver), int(minver)) < (2, 2):
-                color_print(1,"Python version 2.2 or greater required")
-                Exit(1)
-
-            color_print(4,'Bindings Python version... %s' % env['PYTHON_VERSION'])
-            color_print(4,'Python %s prefix... %s' % (env['PYTHON_VERSION'], env['PYTHON_SYS_PREFIX']))
-            color_print(4,'Python bindings will install in... %s' % os.path.normpath(env['PYTHON_INSTALL_LOCATION']))
-            env.Replace(**backup)
 
         # if requested, sort LIBPATH and CPPPATH one last time before saving...
         if env['PRIORITIZE_LINKING']:
-            conf.prioritize_paths()
+            conf.prioritize_paths(silent=True)
 
         # finish config stage and pickle results
         env = conf.Finish()
@@ -1602,25 +2009,21 @@ if not HELP_REQUESTED:
     env['create_uninstall_target'] = create_uninstall_target
 
     if env['PKG_CONFIG_PATH']:
-        env['ENV']['PKG_CONFIG_PATH'] = os.path.realpath(env['PKG_CONFIG_PATH'])
+        env['ENV']['PKG_CONFIG_PATH'] = fix_path(env['PKG_CONFIG_PATH'])
         # otherwise this variable == os.environ["PKG_CONFIG_PATH"]
 
     if env['PATH']:
-        env['ENV']['PATH'] = os.path.realpath(env['PATH']) + ':' + env['ENV']['PATH']
+        env['ENV']['PATH'] = fix_path(env['PATH']) + ':' + env['ENV']['PATH']
 
     if env['PATH_REMOVE']:
-        p = env['PATH_REMOVE']
-        if p in env['ENV']['PATH']:
-            env['ENV']['PATH'].replace(p,'')
-        def rm_path(set):
-            for i in env[set]:
-                if p in i:
-                    env[set].remove(i)
-        rm_path('LIBPATH')
-        rm_path('CPPPATH')
-        rm_path('CXXFLAGS')
-        rm_path('CAIROMM_LIBPATHS')
-        rm_path('CAIROMM_CPPPATHS')
+        for p in env['PATH_REMOVE'].split(':'):
+            if p in env['ENV']['PATH']:
+                env['ENV']['PATH'].replace(p,'')
+            rm_path(p,'LIBPATH',env)
+            rm_path(p,'CPPPATH',env)
+            rm_path(p,'CXXFLAGS',env)
+            rm_path(p,'CAIRO_LIBPATHS',env)
+            rm_path(p,'CAIRO_CPPPATHS',env)
 
     if env['PATH_REPLACE']:
         searches,replace = env['PATH_REPLACE'].split(':')
@@ -1636,27 +2039,19 @@ if not HELP_REQUESTED:
             replace_path('LIBPATH',search,replace)
             replace_path('CPPPATH',search,replace)
             replace_path('CXXFLAGS',search,replace)
-            replace_path('CAIROMM_LIBPATHS',search,replace)
-            replace_path('CAIROMM_CPPPATHS',search,replace)
+            replace_path('CAIRO_LIBPATHS',search,replace)
+            replace_path('CAIRO_CPPPATHS',search,replace)
 
     # export env so it is available in build.py files
     Export('env')
 
     plugin_base = env.Clone()
-    # for this to work you need:
-    # if __GNUC__ >= 4
-    # define MAPNIK_EXP __attribute__ ((visibility ("default")))
-    #plugin_base.Append(CXXFLAGS='-fvisibility=hidden')
-    #plugin_base.Append(CXXFLAGS='-fvisibility-inlines-hidden')
+
+    if env['COVERAGE']:
+        plugin_base.Append(LINKFLAGS='--coverage')
+        plugin_base.Append(CXXFLAGS='--coverage')
 
     Export('plugin_base')
-
-    # clear the '_CPPDEFFLAGS' variable
-    # for unknown reasons this variable puts -DNone
-    # in the g++ args prompting unnecessary recompiles
-    env['_CPPDEFFLAGS'] = None
-    plugin_base['_CPPDEFFLAGS'] = None
-
 
     if env['FAST']:
         # caching is 'auto' by default in SCons
@@ -1665,101 +2060,116 @@ if not HELP_REQUESTED:
         SetOption('implicit_cache', 1)
         SetOption('max_drift', 1)
 
-    else:
-        # Set the cache mode to 'force' unless requested, avoiding hidden caching of Scons 'opts' in '.sconsign.dblite'
-        # This allows for a SCONS_LOCAL_CONFIG, if present, to be used as the primary means of storing paths to successful build dependencies
-        SetCacheMode('force')
-
-    if env['JOBS'] > 1:
-        SetOption("num_jobs", env['JOBS'])
-
     # Build agg first, doesn't need anything special
     if env['RUNTIME_LINK'] == 'shared':
         SConscript('deps/agg/build.py')
 
+    # Build spirit grammars
+    SConscript('src/json/build.py')
+    SConscript('src/wkt/build.py')
+
     # Build the core library
     SConscript('src/build.py')
+
+    # Install headers
+    SConscript('include/build.py')
+
+    # Install auxiliary headers
+    SConscript('deps/mapnik/build.py')
 
     # Build the requested and able-to-be-compiled input plug-ins
     GDAL_BUILT = False
     OGR_BUILT = False
-    for plugin in env['REQUESTED_PLUGINS']:
-        details = env['PLUGINS'][plugin]
-        if details['lib'] in env['LIBS']:
-            SConscript('plugins/input/%s/build.py' % plugin)
-            if plugin == 'ogr': OGR_BUILT = True
-            if plugin == 'gdal': GDAL_BUILT = True
-            if plugin == 'ogr' or plugin == 'gdal':
-                if GDAL_BUILT and OGR_BUILT:
+    POSTGIS_BUILT = False
+    PGRASTER_BUILT = False
+    for plugin in env['PLUGINS']:
+        if env['PLUGIN_LINKING'] == 'static' or plugin not in env['REQUESTED_PLUGINS']:
+            if os.path.exists('plugins/input/%s.input' % plugin):
+                os.unlink('plugins/input/%s.input' % plugin)
+        elif plugin in env['REQUESTED_PLUGINS']:
+            details = env['PLUGINS'][plugin]
+            if details['lib'] in env['LIBS']:
+                if env['PLUGIN_LINKING'] == 'shared':
+                    SConscript('plugins/input/%s/build.py' % plugin)
+                # hack to avoid breaking on plugins with the same dep
+                if plugin == 'ogr': OGR_BUILT = True
+                if plugin == 'gdal': GDAL_BUILT = True
+                if plugin == 'postgis': POSTGIS_BUILT = True
+                if plugin == 'pgraster': PGRASTER_BUILT = True
+                if plugin == 'ogr' or plugin == 'gdal':
+                    if GDAL_BUILT and OGR_BUILT:
+                        env['LIBS'].remove(details['lib'])
+                elif plugin == 'postgis' or plugin == 'pgraster':
+                    if POSTGIS_BUILT and PGRASTER_BUILT:
+                        env['LIBS'].remove(details['lib'])
+                else:
                     env['LIBS'].remove(details['lib'])
+            elif not details['lib']:
+                if env['PLUGIN_LINKING'] == 'shared':
+                    # build internal datasource input plugins
+                    SConscript('plugins/input/%s/build.py' % plugin)
             else:
-                env['LIBS'].remove(details['lib'])
-        elif not details['lib']:
-            # build internal shape and raster plugins
-            SConscript('plugins/input/%s/build.py' % plugin)
-        else:
-            color_print(1,"Notice: dependencies not met for plugin '%s', not building..." % plugin)
+                color_print(1,"Notice: dependencies not met for plugin '%s', not building..." % plugin)
+                if os.path.exists('plugins/input/%s.input' % plugin):
+                    os.unlink('plugins/input/%s.input' % plugin)
 
     create_uninstall_target(env, env['MAPNIK_LIB_DIR_DEST'], False)
     create_uninstall_target(env, env['MAPNIK_INPUT_PLUGINS_DEST'] , False)
-    create_uninstall_target(env, env['MAPNIK_INPUT_PLUGINS_DEST'] , False)
 
-    # before installing plugins, wipe out any previously
-    # installed plugins that we are no longer building
     if 'install' in COMMAND_LINE_TARGETS:
+        # if statically linking plugins still make sure
+        # to create the dynamic plugins directory
+        if env['PLUGIN_LINKING'] == 'static':
+            if not os.path.exists(env['MAPNIK_INPUT_PLUGINS_DEST']):
+                os.makedirs(env['MAPNIK_INPUT_PLUGINS_DEST'])
+        # before installing plugins, wipe out any previously
+        # installed plugins that we are no longer building
         for plugin in PLUGINS.keys():
-            if plugin not in env['REQUESTED_PLUGINS']:
-                plugin_path = os.path.join(env['MAPNIK_INPUT_PLUGINS_DEST'],'%s.input' % plugin)
-                if os.path.exists(plugin_path):
-                    color_print(1,"Notice: removing out of date plugin: '%s'" % plugin_path)
+            plugin_path = os.path.join(env['MAPNIK_INPUT_PLUGINS_DEST'],'%s.input' % plugin)
+            if os.path.exists(plugin_path):
+                if plugin not in env['REQUESTED_PLUGINS'] or env['PLUGIN_LINKING'] == 'static':
+                    color_print(4,"Notice: removing out of date plugin: '%s'" % plugin_path)
                     os.unlink(plugin_path)
 
     # Build the c++ rundemo app if requested
-    if env['DEMO']:
-        SConscript('demo/c++/build.py')
-
-    # Build the pgsql2psqlite app if requested
-    if env['PGSQL2SQLITE']:
-        SConscript('utils/pgsql2sqlite/build.py')
+    if not env['HOST']:
+        if env['DEMO']:
+            SConscript('demo/c++/build.py')
 
     # Build shapeindex and remove its dependency from the LIBS
-    if 'boost_program_options%s' % env['BOOST_APPEND'] in env['LIBS']:
-        SConscript('utils/shapeindex/build.py')
-
-        # devtools not ready for public
-        #SConscript('utils/ogrindex/build.py')
-        SConscript('utils/svg2png/build.py')
-        env['LIBS'].remove('boost_program_options%s' % env['BOOST_APPEND'])
-    else :
-        color_print(1,"WARNING: Cannot find boost_program_options. 'shapeindex' won't be available")
-
-    # Build the Python bindings
-    if 'python' in env['BINDINGS']:
-        SConscript('bindings/python/build.py')
-
-        # Install the python speed testing scripts if python bindings will be available
-        SConscript('utils/performance/build.py')
-
-    # Install the mapnik upgrade script
-    SConscript('utils/upgrade_map_xml/build.py')
+    if not env['HOST']:
+        if 'boost_program_options%s' % env['BOOST_APPEND'] in env['LIBS']:
+            if env['SHAPEINDEX']:
+                SConscript('utils/shapeindex/build.py')
+            if env['MAPNIK_INDEX']:
+                SConscript('utils/mapnik-index/build.py')
+            # Build the pgsql2psqlite app if requested
+            if env['PGSQL2SQLITE']:
+                SConscript('utils/pgsql2sqlite/build.py')
+            if env['SVG2PNG']:
+                SConscript('utils/svg2png/build.py')
+            if env['MAPNIK_RENDER']:
+                SConscript('utils/mapnik-render/build.py')
+            # devtools not ready for public
+            #SConscript('utils/ogrindex/build.py')
+            env['LIBS'].remove('boost_program_options%s' % env['BOOST_APPEND'])
+        else :
+            color_print(1,"WARNING: Cannot find boost_program_options. 'shapeindex' and other command line programs will not be available")
 
     # Configure fonts and if requested install the bundled DejaVu fonts
     SConscript('fonts/build.py')
 
     # build C++ tests
-    # not ready for release
-    SConscript('tests/cpp_tests/build.py')
+    SConscript('test/build.py')
 
-    # not ready for release
-    #if env['SVG_RENDERER']:
-    #    SConscript('tests/cpp_tests/svg_renderer_tests/build.py')
+    if env['BENCHMARK']:
+        SConscript('benchmark/build.py')
 
-    # install pkg-config script and mapnik-config script
+    if os.path.exists('./bindings/python/build.py'):
+        SConscript('./bindings/python/build.py')
+
+    # install mapnik-config script
     SConscript('utils/mapnik-config/build.py')
 
     # write the viewer.ini file
     SConscript('demo/viewer/build.py')
-
-    # if requested, build the sample input plugins
-    if env['SAMPLE_INPUT_PLUGINS']:
-        SConscript('plugins/input/templates/helloworld/build.py')

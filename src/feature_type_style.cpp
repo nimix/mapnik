@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,11 @@
  *****************************************************************************/
 
 #include <mapnik/feature_type_style.hpp>
+#include <mapnik/rule.hpp>
+#include <mapnik/enumeration.hpp>
+
+// boost
+
 
 namespace mapnik
 {
@@ -35,48 +40,60 @@ IMPLEMENT_ENUM( filter_mode_e, filter_mode_strings )
 
 
 feature_type_style::feature_type_style()
-: filter_mode_(FILTER_ALL),
-    filters_(),
-    direct_filters_(),
-    scale_denom_validity_(-1),
-    opacity_(1.0f)
+    : rules_(),
+      filter_mode_(FILTER_ALL),
+      filters_(),
+      direct_filters_(),
+      comp_op_(),
+      opacity_(1.0f),
+      image_filters_inflate_(false)
 {}
 
-feature_type_style::feature_type_style(feature_type_style const& rhs, bool deep_copy)
-    : filter_mode_(rhs.filter_mode_),
+feature_type_style::feature_type_style(feature_type_style const& rhs)
+    : rules_(rhs.rules_),
+      filter_mode_(rhs.filter_mode_),
       filters_(rhs.filters_),
       direct_filters_(rhs.direct_filters_),
       comp_op_(rhs.comp_op_),
-      scale_denom_validity_(-1),
-      opacity_(rhs.opacity_)
-{
-    if (!deep_copy) {
-        rules_ = rhs.rules_;
-    } else {
-        rules::const_iterator it  = rhs.rules_.begin(),
-            end = rhs.rules_.end();
-        for(; it != end; ++it) {
-            rules_.push_back(rule(*it, deep_copy));
-        }
-    }
-}
+      opacity_(rhs.opacity_),
+      image_filters_inflate_(rhs.image_filters_inflate_) {}
 
-feature_type_style& feature_type_style::operator=(feature_type_style const& rhs)
+feature_type_style::feature_type_style(feature_type_style && rhs)
+    : rules_(std::move(rhs.rules_)),
+      filter_mode_(std::move(rhs.filter_mode_)),
+      filters_(std::move(rhs.filters_)),
+      direct_filters_(std::move(rhs.direct_filters_)),
+      comp_op_(std::move(rhs.comp_op_)),
+      opacity_(std::move(rhs.opacity_)),
+      image_filters_inflate_(std::move(rhs.image_filters_inflate_)) {}
+
+feature_type_style& feature_type_style::operator=(feature_type_style rhs)
 {
-    if (this == &rhs) return *this;
-    rules_=rhs.rules_;   
-    filters_ = rhs.filters_;
-    direct_filters_ = rhs.direct_filters_;
-    comp_op_ = rhs.comp_op_;
-    scale_denom_validity_ = -1;
-    opacity_= rhs.opacity_;
+    using std::swap;
+    std::swap(this->rules_, rhs.rules_);
+    std::swap(this->filter_mode_, rhs.filter_mode_);
+    std::swap(this->filters_, rhs.filters_);
+    std::swap(this->direct_filters_, rhs.direct_filters_);
+    std::swap(this->comp_op_, rhs.comp_op_);
+    std::swap(this->opacity_, rhs.opacity_);
+    std::swap(this->image_filters_inflate_, rhs.image_filters_inflate_);
     return *this;
 }
 
-void feature_type_style::add_rule(rule const& rule)
+bool feature_type_style::operator==(feature_type_style const& rhs) const
 {
-    rules_.push_back(rule);
-    scale_denom_validity_ = -1;
+    return (rules_ == rhs.rules_) &&
+        (filter_mode_ == rhs.filter_mode_) &&
+        (filters_ == rhs.filters_) &&
+        (direct_filters_ == rhs.direct_filters_) &&
+        (comp_op_ == rhs.comp_op_) &&
+        (opacity_ == rhs.opacity_) &&
+        (image_filters_inflate_ == rhs.image_filters_inflate_);
+}
+
+void feature_type_style::add_rule(rule && rule)
+{
+    rules_.push_back(std::move(rule));
 }
 
 rules const& feature_type_style::get_rules() const
@@ -87,6 +104,18 @@ rules const& feature_type_style::get_rules() const
 rules& feature_type_style::get_rules_nonconst()
 {
     return rules_;
+}
+
+bool feature_type_style::active(double scale_denom) const
+{
+    for (rule const& r : rules_)
+    {
+        if (r.active(scale_denom))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void feature_type_style::set_filter_mode(filter_mode_e mode)
@@ -119,9 +148,9 @@ std::vector<filter::filter_type> const&  feature_type_style::direct_image_filter
     return direct_filters_;
 }
 
-void feature_type_style::set_comp_op(composite_mode_e comp_op)
+void feature_type_style::set_comp_op(composite_mode_e _comp_op)
 {
-    comp_op_ = comp_op;
+    comp_op_ = _comp_op;
 }
 
 boost::optional<composite_mode_e> feature_type_style::comp_op() const
@@ -139,59 +168,14 @@ float feature_type_style::get_opacity() const
     return opacity_;
 }
 
-void feature_type_style::update_rule_cache(double scale_denom)
+void feature_type_style::set_image_filters_inflate(bool inflate)
 {
-    if_rules_.clear();
-    else_rules_.clear();
-    also_rules_.clear();
-
-    BOOST_FOREACH(rule const& r, rules_)
-    {
-        if (r.active(scale_denom))
-        {
-            if (r.has_else_filter())
-            {
-                else_rules_.push_back(const_cast<rule*>(&r));
-            }
-            else if (r.has_also_filter())
-            {
-                also_rules_.push_back(const_cast<rule*>(&r));
-            }
-            else
-            {
-                if_rules_.push_back(const_cast<rule*>(&r));
-            }
-        }
-    }
-
-    scale_denom_validity_ = scale_denom;
+    image_filters_inflate_ = inflate;
 }
 
-rule_ptrs const& feature_type_style::get_if_rules(double scale_denom)
+bool feature_type_style::image_filters_inflate() const
 {
-    if (scale_denom_validity_ != scale_denom)
-    {
-        update_rule_cache(scale_denom);
-    }
-    return if_rules_;
-}
-
-rule_ptrs const& feature_type_style::get_else_rules(double scale_denom)
-{
-    if (scale_denom_validity_ != scale_denom)
-    {
-        update_rule_cache(scale_denom);
-    }
-    return else_rules_;
-}
-
-rule_ptrs const& feature_type_style::get_also_rules(double scale_denom)
-{
-    if (scale_denom_validity_ != scale_denom)
-    {
-        update_rule_cache(scale_denom);
-    }
-    return also_rules_;
+    return image_filters_inflate_;
 }
 
 }

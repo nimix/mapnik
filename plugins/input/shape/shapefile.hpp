@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,16 +26,23 @@
 // stl
 #include <cstring>
 #include <fstream>
+#include <stdexcept>
+#include <cstdint>
 
 // mapnik
 #include <mapnik/global.hpp>
-#include <mapnik/box2d.hpp>
-#include <mapnik/mapped_memory_cache.hpp>
+#include <mapnik/util/utf_conv_win.hpp>
+#include <mapnik/geometry/box2d.hpp>
 
-// boost
-#include <boost/utility.hpp>
-#include <boost/cstdint.hpp>
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/interprocess/mapped_region.hpp>
 #include <boost/interprocess/streams/bufferstream.hpp>
+#pragma GCC diagnostic pop
+#include <mapnik/mapped_memory_cache.hpp>
+#endif
+#include <mapnik/util/noncopyable.hpp>
 
 using mapnik::box2d;
 using mapnik::read_int32_ndr;
@@ -46,7 +53,7 @@ using mapnik::read_double_xdr;
 
 struct RecordTag
 {
-    typedef char* data_type;
+    using data_type = char*;
     static data_type alloc(unsigned size)
     {
         return static_cast<data_type>(::operator new(sizeof(char)*size));
@@ -60,7 +67,7 @@ struct RecordTag
 
 struct MappedRecordTag
 {
-    typedef const char* data_type;
+    using data_type = const char*;
     static data_type alloc(unsigned) { return 0; }
     static void dealloc(data_type ) {}
 };
@@ -69,12 +76,12 @@ template <typename Tag>
 struct shape_record
 {
     typename Tag::data_type data;
-    size_t size;
-    mutable size_t pos;
+    std::size_t size;
+    mutable std::size_t pos;
 
-    explicit shape_record(size_t size)
-        : data(Tag::alloc(size)),
-          size(size),
+    explicit shape_record(size_t size_)
+        : data(Tag::alloc(size_)),
+          size(size_),
           pos(0)
     {}
 
@@ -98,9 +105,14 @@ struct shape_record
         pos += n;
     }
 
+    void set_pos(unsigned pos_)
+    {
+        pos = pos_;
+    }
+
     int read_ndr_integer()
     {
-        boost::int32_t val;
+        std::int32_t val;
         read_int32_ndr(&data[pos], val);
         pos += 4;
         return val;
@@ -108,7 +120,7 @@ struct shape_record
 
     int read_xdr_integer()
     {
-        boost::int32_t val;
+        std::int32_t val;
         read_int32_xdr(&data[pos], val);
         pos += 4;
         return val;
@@ -126,20 +138,21 @@ struct shape_record
     {
         return (size - pos);
     }
+
+    std::size_t length() {return size;}
 };
 
-using namespace boost::interprocess;
-
-class shape_file : boost::noncopyable
+class shape_file : mapnik::util::noncopyable
 {
 public:
 
-#ifdef SHAPE_MEMORY_MAPPED_FILE
-    typedef ibufferstream file_source_type;
-    typedef shape_record<MappedRecordTag> record_type;
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
+    using file_source_type = boost::interprocess::ibufferstream;
+    using record_type = shape_record<MappedRecordTag>;
+    mapnik::mapped_region_ptr mapped_region_;
 #else
-    typedef std::ifstream file_source_type;
-    typedef shape_record<RecordTag> record_type;
+    using file_source_type = std::ifstream;
+    using record_type = shape_record<RecordTag>;
 #endif
 
     file_source_type file_;
@@ -147,19 +160,26 @@ public:
     shape_file() {}
 
     shape_file(std::string  const& file_name) :
-#ifdef SHAPE_MEMORY_MAPPED_FILE
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
         file_()
+#elif defined (_WINDOWS)
+        file_(mapnik::utf8_to_utf16(file_name), std::ios::in | std::ios::binary)
 #else
         file_(file_name.c_str(), std::ios::in | std::ios::binary)
 #endif
     {
-#ifdef SHAPE_MEMORY_MAPPED_FILE
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
         boost::optional<mapnik::mapped_region_ptr> memory =
-            mapnik::mapped_memory_cache::find(file_name.c_str(),true);
+            mapnik::mapped_memory_cache::instance().find(file_name,true);
 
         if (memory)
         {
-            file_.buffer(static_cast<char*>((*memory)->get_address()), (*memory)->get_size());
+            mapped_region_ = *memory;
+            file_.buffer(static_cast<char*>(mapped_region_->get_address()),mapped_region_->get_size());
+        }
+        else
+        {
+            throw std::runtime_error("could not create file mapping for "+file_name);
         }
 #endif
     }
@@ -171,9 +191,9 @@ public:
         return file_;
     }
 
-    inline bool is_open()
+    inline bool is_open() const
     {
-#ifdef SHAPE_MEMORY_MAPPED_FILE
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
         return (file_.buffer().second > 0);
 #else
         return file_.is_open();
@@ -182,7 +202,7 @@ public:
 
     inline void read_record(record_type& rec)
     {
-#ifdef SHAPE_MEMORY_MAPPED_FILE
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
         rec.set_data(file_.buffer().first + file_.tellg());
         file_.seekg(rec.size, std::ios::cur);
 #else
@@ -194,7 +214,7 @@ public:
     {
         char b[4];
         file_.read(b, 4);
-        boost::int32_t val;
+        std::int32_t val;
         read_int32_xdr(b, val);
         return val;
     }
@@ -203,7 +223,7 @@ public:
     {
         char b[4];
         file_.read(b, 4);
-        boost::int32_t val;
+        std::int32_t val;
         read_int32_ndr(b, val);
         return val;
     }
@@ -211,30 +231,13 @@ public:
     inline double read_double()
     {
         double val;
-#ifndef MAPNIK_BIG_ENDIAN
         file_.read(reinterpret_cast<char*>(&val), 8);
-#else
-        char b[8];
-        file_.read(b, 8);
-        read_double_ndr(b, val);
-#endif
         return val;
     }
 
     inline void read_envelope(box2d<double>& envelope)
     {
-#ifndef MAPNIK_BIG_ENDIAN
         file_.read(reinterpret_cast<char*>(&envelope), sizeof(envelope));
-#else
-        char data[4 * 8];
-        file_.read(data,4 * 8);
-        double minx, miny, maxx, maxy;
-        read_double_ndr(data + 0 * 8, minx);
-        read_double_ndr(data + 1 * 8, miny);
-        read_double_ndr(data + 2 * 8, maxx);
-        read_double_ndr(data + 3 * 8, maxy);
-        envelope.init(minx, miny, maxx, maxy);
-#endif
     }
 
     inline void skip(std::streampos bytes)
@@ -260,6 +263,11 @@ public:
     inline bool is_eof()
     {
         return file_.eof();
+    }
+
+    inline bool is_good()
+    {
+        return file_.good();
     }
 };
 

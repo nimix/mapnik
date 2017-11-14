@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,11 +26,11 @@
 // mapnik
 #include <mapnik/svg/svg_path_attributes.hpp>
 #include <mapnik/svg/svg_path_adapter.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/safe_cast.hpp>
 
-// boost
-#include <boost/utility.hpp>
-
-// agg
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_path_storage.h"
 #include "agg_conv_transform.h"
 #include "agg_conv_stroke.h"
@@ -38,6 +38,7 @@
 #include "agg_conv_curve.h"
 #include "agg_color_rgba.h"
 #include "agg_bounding_rect.h"
+#pragma GCC diagnostic pop
 
 // stl
 #include <stdexcept>
@@ -46,30 +47,33 @@ namespace mapnik {
 namespace svg {
 
 template <typename VertexSource, typename AttributeSource>
-class svg_converter : boost::noncopyable
+class svg_converter : util::noncopyable
 {
 public:
 
     svg_converter(VertexSource & source, AttributeSource & attributes)
         : source_(source),
-          attributes_(attributes) {}
+          attributes_(attributes),
+          attr_stack_(),
+          svg_width_(0.0),
+          svg_height_(0.0) {}
 
     void begin_path()
     {
-        unsigned idx = source_.start_new_path();
-        attributes_.add(path_attributes(cur_attr(), idx));
+        std::size_t idx = source_.start_new_path();
+        attributes_.add(path_attributes(cur_attr(), safe_cast<unsigned>(idx)));
     }
-    
+
     void end_path()
     {
         if(attributes_.size() == 0)
         {
             throw std::runtime_error("end_path : The path was not begun");
         }
-        path_attributes attr = cur_attr();
-        unsigned idx = attributes_[attributes_.size() - 1].index;
+        path_attributes& attr = attributes_[attributes_.size() - 1];
+        unsigned idx = attr.index;
+        attr = cur_attr();
         attr.index = idx;
-        attributes_[attributes_.size() - 1] = attr;
     }
 
     void move_to(double x, double y, bool rel=false)  // M, m
@@ -90,7 +94,7 @@ public:
         double y2 = 0.0;
         if(source_.total_vertices())
         {
-            source_.vertex(source_.total_vertices() - 1, &x2, &y2);
+            source_.vertex(safe_cast<unsigned>(source_.total_vertices() - 1), &x2, &y2);
             if(rel) x += x2;
             source_.line_to(x, y2);
         }
@@ -102,7 +106,7 @@ public:
         double y2 = 0.0;
         if(source_.total_vertices())
         {
-            source_.vertex(source_.total_vertices() - 1, &x2, &y2);
+            source_.vertex(safe_cast<unsigned>(source_.total_vertices() - 1), &x2, &y2);
             if(rel) y += y2;
             source_.line_to(x2, y);
         }
@@ -222,7 +226,15 @@ public:
         attr.stroke_color.opacity(a * s.opacity());
         attr.stroke_flag = true;
     }
-
+    void dash_array(dash_array && dash)
+    {
+        path_attributes& attr = cur_attr();
+        attr.dash = std::move(dash);
+    }
+    void dash_offset(double offset)
+    {
+        cur_attr().dash_offset = offset;
+    }
     void even_odd(bool flag)
     {
         cur_attr().even_odd_flag = flag;
@@ -247,18 +259,20 @@ public:
     {
         return cur_attr().display_flag;
     }
-    
+
     void stroke_width(double w)
     {
         cur_attr().stroke_width = w;
     }
     void fill_none()
     {
+        cur_attr().fill_none = true;
         cur_attr().fill_flag = false;
     }
 
     void stroke_none()
     {
+        cur_attr().stroke_none = true;
         cur_attr().stroke_flag = false;
     }
 
@@ -266,6 +280,7 @@ public:
     {
         cur_attr().fill_opacity = op;
     }
+
     void stroke_opacity(double op)
     {
         cur_attr().stroke_opacity = op;
@@ -273,8 +288,7 @@ public:
 
     void opacity(double op)
     {
-        cur_attr().stroke_opacity = op;
-        cur_attr().fill_opacity = op;
+        cur_attr().opacity = op;
     }
 
     void line_join(agg::line_join_e join)
@@ -310,6 +324,22 @@ public:
         agg::bounding_rect(trans, *this, 0, attributes_.size(), x1, y1, x2, y2);
     }
 
+    void set_dimensions(double w, double h)
+    {
+        svg_width_ = w;
+        svg_height_ = h;
+    }
+
+    double width() const
+    {
+        return svg_width_;
+    }
+
+    double height() const
+    {
+        return svg_height_;
+    }
+
     VertexSource & storage()
     {
         return source_;
@@ -335,10 +365,12 @@ private:
     AttributeSource & attributes_;
     AttributeSource  attr_stack_;
     agg::trans_affine transform_;
+    double svg_width_;
+    double svg_height_;
 };
 
 
-typedef svg_converter<svg_path_adapter,agg::pod_bvector<mapnik::svg::path_attributes> > svg_converter_type;
+using svg_converter_type = svg_converter<svg_path_adapter,agg::pod_bvector<mapnik::svg::path_attributes> >;
 
 }}
 

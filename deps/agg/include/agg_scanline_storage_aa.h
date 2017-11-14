@@ -24,9 +24,9 @@
 #ifndef AGG_SCANLINE_STORAGE_AA_INCLUDED
 #define AGG_SCANLINE_STORAGE_AA_INCLUDED
 
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
+#include <cstring>
+#include <cstdlib>
+#include <cmath>
 #include "agg_array.h"
 
 
@@ -312,7 +312,7 @@ namespace agg
 
                 sp.x         = span_iterator->x;
                 sp.len       = span_iterator->len;
-                int len      = abs(int(sp.len));
+                int len      = std::abs(int(sp.len));
                 sp.covers_id = 
                     m_covers.add_cells(span_iterator->covers, 
                                        unsigned(len));

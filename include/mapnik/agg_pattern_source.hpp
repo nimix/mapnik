@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,22 +24,23 @@
 #define MAPNIK_AGG_PATTERN_SOURCE_HPP
 
 // mapnik
-#include <mapnik/image_data.hpp>
+#include <mapnik/image.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
-// boost
-#include <boost/utility.hpp>
-
-// agg
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_color_rgba.h"
+#pragma GCC diagnostic pop
 
 namespace mapnik
 {
 
-class pattern_source : private boost::noncopyable
+class pattern_source : private util::noncopyable
 {
 public:
-    pattern_source(image_data_32 const& pattern)
-        : pattern_(pattern) {}
+    pattern_source(image_rgba8 const& pattern, double opacity = 1.0)
+        : pattern_(pattern),
+          opacity_(opacity) {}
 
     unsigned int width() const
     {
@@ -52,13 +53,14 @@ public:
     agg::rgba8 pixel(int x, int y) const
     {
         unsigned c = pattern_(x,y);
-        return agg::rgba8(c & 0xff,
-                          (c >> 8) & 0xff,
-                          (c >> 16) & 0xff,
-                          (c >> 24) & 0xff);
+        return agg::rgba8(static_cast<unsigned>((c & 0xff) * opacity_),
+                          static_cast<unsigned>(((c >> 8) & 0xff) * opacity_),
+                          static_cast<unsigned>(((c >> 16) & 0xff) * opacity_),
+                          static_cast<unsigned>(((c >> 24) & 0xff) * opacity_));
     }
 private:
-    image_data_32 const& pattern_;
+    image_rgba8 const& pattern_;
+    double opacity_;
 };
 }
 

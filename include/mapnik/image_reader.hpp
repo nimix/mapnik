@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,8 +24,16 @@
 #define MAPNIK_IMAGE_READER_HPP
 
 // mapnik
-#include <mapnik/image_data.hpp>
+#include <mapnik/image_any.hpp>
 #include <mapnik/config.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/factory.hpp>
+#include <mapnik/geometry/box2d.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/optional.hpp>
+#pragma GCC diagnostic pop
 
 // stl
 #include <stdexcept>
@@ -33,33 +41,43 @@
 
 namespace mapnik
 {
+
 class image_reader_exception : public std::exception
 {
 private:
     std::string message_;
 public:
-    image_reader_exception(const std::string& message)
+    image_reader_exception(std::string const& message)
         : message_(message) {}
 
-    ~image_reader_exception() throw() {}
+    ~image_reader_exception() {}
 
-    virtual const char* what() const throw()
+    virtual const char* what() const noexcept
     {
         return message_.c_str();
     }
 };
 
-struct MAPNIK_DECL image_reader
+struct MAPNIK_DECL image_reader : private util::noncopyable
 {
-    virtual unsigned width() const=0;
-    virtual unsigned height() const=0;
-    virtual void read(unsigned x,unsigned y,image_data_32& image)=0;
+    virtual unsigned width() const = 0;
+    virtual unsigned height() const = 0;
+    virtual bool has_alpha() const = 0;
+    virtual boost::optional<box2d<double> > bounding_box() const = 0;
+    virtual void read(unsigned x,unsigned y,image_rgba8& image) = 0;
+    virtual image_any read(unsigned x, unsigned y, unsigned width, unsigned height) = 0;
     virtual ~image_reader() {}
 };
 
-bool register_image_reader(const std::string& type,image_reader* (*)(const std::string&));
-MAPNIK_DECL image_reader* get_image_reader(const std::string& file,const std::string& type);
-MAPNIK_DECL image_reader* get_image_reader(const std::string& file);
+template <typename...Args>
+bool register_image_reader(std::string const& type, image_reader* (* fun)(Args...))
+{
+    return factory<image_reader,std::string, Args...>::instance().register_product(type, fun);
+}
+
+MAPNIK_DECL image_reader* get_image_reader(std::string const& file, std::string const& type);
+MAPNIK_DECL image_reader* get_image_reader(std::string const& file);
+MAPNIK_DECL image_reader* get_image_reader(char const* data, size_t size);
 
 }
 

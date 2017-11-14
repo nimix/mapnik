@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,19 +24,66 @@
 #define MAPNIK_RASTER_HPP
 
 // mapnik
-#include <mapnik/box2d.hpp>
-#include <mapnik/image_data.hpp>
+#include <mapnik/geometry/box2d.hpp>
+#include <mapnik/image_any.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/util/variant.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/optional.hpp>
+#pragma GCC diagnostic pop
 
 namespace mapnik {
-struct raster
+
+class raster : private util::noncopyable
 {
+public:
     box2d<double> ext_;
-    image_data_32 data_;
-    raster(box2d<double> const& ext,image_data_32 const& data)
+    box2d<double> query_ext_;
+    image_any data_;
+    double filter_factor_;
+    boost::optional<double> nodata_;
+    
+    template <typename ImageData>
+    raster(box2d<double> const& ext,
+           box2d<double> const& query_ext,
+           ImageData && data,
+           double filter_factor)
         : ext_(ext),
-          data_(data) {}
+          query_ext_(query_ext),
+          data_(std::move(data)),
+          filter_factor_(filter_factor) {}
+
+    template <typename ImageData>
+    raster(box2d<double> const& ext,
+           ImageData && data,
+           double filter_factor)
+        : ext_(ext),
+          query_ext_(ext),
+          data_(std::move(data)),
+          filter_factor_(filter_factor) {}
+
+    void set_nodata(double _nodata)
+    {
+        nodata_ = _nodata;
+    }
+
+    boost::optional<double> const& nodata() const
+    {
+        return nodata_;
+    }
+
+    double get_filter_factor() const
+    {
+        return filter_factor_;
+    }
+
+    void set_filter_factor(double factor)
+    {
+        filter_factor_ = factor;
+    }
 };
 }
 
 #endif // MAPNIK_RASTER_HPP
-

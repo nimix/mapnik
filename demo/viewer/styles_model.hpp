@@ -1,6 +1,6 @@
 /* This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * Mapnik is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,10 +14,9 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-//$Id$
 
 #ifndef STYLE_MODEL_HPP
 #define STYLE_MODEL_HPP
@@ -28,14 +27,14 @@
 #include <mapnik/map.hpp>
 #endif
 
-#include <boost/scoped_ptr.hpp>
+
 
 class node;
 class StyleModel : public QAbstractItemModel
 {
       Q_OBJECT
   public:
-      StyleModel(boost::shared_ptr<mapnik::Map> map, QObject * parent=0);
+      StyleModel(std::shared_ptr<mapnik::Map> map, QObject * parent=0);
       ~StyleModel();
       // interface
       QModelIndex index  (int row, int col, QModelIndex const& parent = QModelIndex()) const;
@@ -44,8 +43,8 @@ class StyleModel : public QAbstractItemModel
       int columnCount( QModelIndex const& parent = QModelIndex()) const;
       QVariant  data(const QModelIndex & index, int role = Qt::DisplayRole) const;
    private:
-      //boost::shared_ptr<mapnik::Map> map_;
-      boost::scoped_ptr<node> root_;
+      //std::shared_ptr<mapnik::Map> map_;
+      const std::unique_ptr<node> root_;
 };
 
 #endif // STYLE_MODEL_HPP

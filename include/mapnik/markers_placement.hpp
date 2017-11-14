@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,70 +23,119 @@
 #ifndef MAPNIK_MARKERS_PLACEMENT_HPP
 #define MAPNIK_MARKERS_PLACEMENT_HPP
 
-// mapnik
-#include <mapnik/box2d.hpp>
+#include <mapnik/markers_placements/line.hpp>
+#include <mapnik/markers_placements/point.hpp>
+#include <mapnik/markers_placements/interior.hpp>
+#include <mapnik/markers_placements/vertex_first.hpp>
+#include <mapnik/markers_placements/vertex_last.hpp>
+#include <mapnik/symbolizer_enumerations.hpp>
 
-// boost
-#include <boost/utility.hpp>
-
-// agg
-#include "agg_conv_transform.h"
-
-namespace mapnik {
+namespace mapnik
+{
 
 template <typename Locator, typename Detector>
-class markers_placement : boost::noncopyable
+class markers_placement_finder : util::noncopyable
 {
 public:
-    /** Constructor for markers_placement object.
-     * \param locator  Path along which markers are placed (type: vertex source)
-     * \param size     Size of the marker
-     * \param tr       Affine transform
-     * \param detector Collision detection
-     * \param spacing  Distance between markers. If the value is negative it is
-     *                 converted to a positive value with similar magnitude, but
-     *                 choosen to optimize marker placement. 0 = no markers
-     */
-    markers_placement(Locator &locator, box2d<double> const& size, agg::trans_affine const& tr, Detector &detector, double spacing, double max_error, bool allow_overlap);
-    /** Start again at first marker.
-     * \note Returns the same list of markers only works when they were NOT added
-     *       to the detector.
-     */
-    void rewind();
-    /** Get a point where the marker should be placed.
-     * Each time this function is called a new point is returned.
-     * \param x     Return value for x position
-     * \param y     Return value for x position
-     * \param angle Return value for rotation angle
-     * \param add_to_detector Add selected position to detector
-     * \return True if a place is found, false if none is found.
-     */
-    bool get_point(double & x, double  & y, double & angle,  bool add_to_detector = true);
+    markers_placement_finder(marker_placement_e placement_type,
+                             Locator &locator,
+                             Detector &detector,
+                             markers_placement_params const& params)
+        : placement_type_(placement_type)
+    {
+        switch (placement_type)
+        {
+        default:
+        case MARKER_POINT_PLACEMENT:
+            construct(&point_, locator, detector, params);
+            break;
+        case MARKER_ANGLED_POINT_PLACEMENT:
+            construct(&point_, locator, detector, params);
+            point_.use_angle(true);
+            break;
+        case MARKER_INTERIOR_PLACEMENT:
+            construct(&interior_, locator, detector, params);
+            break;
+        case MARKER_LINE_PLACEMENT:
+            construct(&line_, locator, detector, params);
+            break;
+        case MARKER_VERTEX_FIRST_PLACEMENT:
+            construct(&vertex_first_, locator, detector, params);
+            break;
+        case MARKER_VERTEX_LAST_PLACEMENT:
+            construct(&vertex_last_, locator, detector, params);
+            break;
+        }
+    }
+
+    ~markers_placement_finder()
+    {
+        switch (placement_type_)
+        {
+        default:
+        case MARKER_POINT_PLACEMENT:
+        case MARKER_ANGLED_POINT_PLACEMENT:
+            destroy(&point_);
+            break;
+        case MARKER_INTERIOR_PLACEMENT:
+            destroy(&interior_);
+            break;
+        case MARKER_LINE_PLACEMENT:
+            destroy(&line_);
+            break;
+        case MARKER_VERTEX_FIRST_PLACEMENT:
+            destroy(&vertex_first_);
+            break;
+        case MARKER_VERTEX_LAST_PLACEMENT:
+            destroy(&vertex_last_);
+            break;
+        }
+    }
+
+    // Get next point where the marker should be placed. Returns true if a place is found, false if none is found.
+    bool get_point(double &x, double &y, double &angle, bool ignore_placement)
+    {
+        switch (placement_type_)
+        {
+        default:
+        case MARKER_POINT_PLACEMENT:
+        case MARKER_ANGLED_POINT_PLACEMENT:
+            return point_.get_point(x, y, angle, ignore_placement);
+        case MARKER_INTERIOR_PLACEMENT:
+            return interior_.get_point(x, y, angle, ignore_placement);
+        case MARKER_LINE_PLACEMENT:
+            return line_.get_point(x, y, angle, ignore_placement);
+        case MARKER_VERTEX_FIRST_PLACEMENT:
+            return vertex_first_.get_point(x, y, angle, ignore_placement);
+        case MARKER_VERTEX_LAST_PLACEMENT:
+            return vertex_last_.get_point(x, y, angle, ignore_placement);
+        }
+    }
+
 private:
-    Locator &locator_;
-    box2d<double> size_;
-    agg::trans_affine tr_;
-    Detector &detector_;
-    double spacing_;
-    double marker_width_;
-    double max_error_;
-    bool allow_overlap_;
+    marker_placement_e const placement_type_;
 
-    bool done_;
-    double last_x, last_y;
-    double next_x, next_y;
-    /** If a marker could not be placed at the exact point where it should
-     * go the next marker's distance will be a bit lower. */
-    double error_;
-    double spacing_left_;
-    unsigned marker_nr_;
+    union
+    {
+        markers_point_placement<Locator, Detector> point_;
+        markers_line_placement<Locator, Detector> line_;
+        markers_interior_placement<Locator, Detector> interior_;
+        markers_vertex_first_placement<Locator, Detector> vertex_first_;
+        markers_vertex_last_placement<Locator, Detector> vertex_last_;
+    };
 
-    /** Rotates the size_ box and translates the position. */
-    box2d<double> perform_transform(double angle, double dx, double dy);
-    /** Automatically chooses spacing. */
-    double find_optimal_spacing(double s);
-    /** Set spacing_left_, adjusts error_ and performs sanity checks. */
-    void set_spacing_left(double sl, bool allow_negative=false);
+    template <typename T>
+    static T* construct(T* what, Locator & locator, Detector & detector,
+                        markers_placement_params const& params)
+    {
+        return new(what) T(locator, detector, params);
+    }
+
+    template <typename T>
+    static void destroy(T* what)
+    {
+        what->~T();
+    }
 };
 
 }

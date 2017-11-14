@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,15 +20,16 @@
  *
  *****************************************************************************/
 
-#ifndef MAPNIK_XML_NODE_H
-#define MAPNIK_XML_NODE_H
+#ifndef MAPNIK_XML_NODE_HPP
+#define MAPNIK_XML_NODE_HPP
 
 //mapnik
-#include <mapnik/boolean.hpp>
+#include <mapnik/config.hpp> // for MAPNIK_DECL
 
-
-//boost
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/optional.hpp>
+#pragma GCC diagnostic pop
 
 //stl
 #include <list>
@@ -38,53 +39,59 @@
 
 namespace mapnik
 {
-class xml_tree;
+class MAPNIK_DECL xml_tree;
 
-class xml_attribute
+class MAPNIK_DECL xml_attribute
 {
 public:
-    xml_attribute(std::string const& value);
+    xml_attribute(const char * value_);
     std::string value;
     mutable bool processed;
 };
 
-class node_not_found: public std::exception
+class MAPNIK_DECL node_not_found: public std::exception
 {
 public:
     node_not_found(std::string const& node_name);
-    virtual const char* what() const throw();
-    ~node_not_found() throw ();
+    virtual const char* what() const noexcept;
+    ~node_not_found();
 private:
     std::string node_name_;
+protected:
+    mutable std::string msg_;
 };
 
-class attribute_not_found: public std::exception
+class MAPNIK_DECL attribute_not_found: public std::exception
 {
 public:
     attribute_not_found(std::string const& node_name, std::string const& attribute_name);
-    virtual const char* what() const throw();
-    ~attribute_not_found() throw ();
+    virtual const char* what() const noexcept;
+    ~attribute_not_found();
 private:
     std::string node_name_;
     std::string attribute_name_;
+protected:
+    mutable std::string msg_;
 };
 
-class more_than_one_child: public std::exception
+class MAPNIK_DECL more_than_one_child: public std::exception
 {
 public:
     more_than_one_child(std::string const& node_name);
-    virtual const char* what() const throw();
-    ~more_than_one_child() throw ();
+    virtual const char* what() const noexcept;
+    ~more_than_one_child();
 private:
     std::string node_name_;
+protected:
+    mutable std::string msg_;
 };
 
-class xml_node
+class MAPNIK_DECL xml_node
 {
 public:
-    typedef std::list<xml_node>::const_iterator const_iterator;
-    typedef std::map<std::string, xml_attribute> attribute_map;
-    xml_node(xml_tree &tree, std::string const& name, unsigned line=0, bool is_text = false);
+    using const_iterator = std::list<xml_node>::const_iterator;
+    using attribute_map = std::map<std::string, xml_attribute>;
+    xml_node(xml_tree &tree, std::string && name, unsigned line=0, bool is_text = false);
 
     std::string const& name() const;
     std::string const& text() const;
@@ -92,15 +99,20 @@ public:
     bool is_text() const;
     bool is(std::string const& name) const;
 
-    xml_node &add_child(std::string const& name, unsigned line=0, bool is_text = false);
-    void add_attribute(std::string const& name, std::string const& value);
+    xml_node & add_child(const char * name, unsigned line=0, bool is_text = false);
+    void add_attribute(const char * name, const char * value);
     attribute_map const& get_attributes() const;
+
+    bool ignore() const;
+    void set_ignore(bool ignore) const;
 
     bool processed() const;
     void set_processed(bool processed) const;
 
     unsigned line() const;
+    std::string line_to_string() const;
 
+    std::size_t size() const;
     const_iterator begin() const;
     const_iterator end() const;
 
@@ -108,35 +120,34 @@ public:
     xml_node const& get_child(std::string const& name) const;
     xml_node const* get_opt_child(std::string const& name) const;
     bool has_child(std::string const& name) const;
+    bool has_attribute(std::string const& name) const;
 
     template <typename T>
     boost::optional<T> get_opt_attr(std::string const& name) const;
 
     template <typename T>
-    T get_attr(std::string const& name, T const& default_value) const;
+    T get_attr(std::string const& name, T const& default_opt_value) const;
     template <typename T>
     T get_attr(std::string const& name) const;
 
-    std::string get_text() const;
+    std::string const& get_text() const;
 
-    xml_tree const& get_tree() const
-    {
-        return tree_;
-    }
+    inline xml_tree const& get_tree() const { return tree_; }
 
     template <typename T>
     T get_value() const;
 private:
-    xml_tree &tree_;
+    xml_tree & tree_;
     std::string name_;
     std::list<xml_node> children_;
     attribute_map attributes_;
     bool is_text_;
     unsigned line_;
     mutable bool processed_;
+    mutable bool ignore_;
     static std::string xml_text;
 };
 
 } //ns mapnik
 
-#endif // MAPNIK_XML_NODE_H
+#endif // MAPNIK_XML_NODE_HPP

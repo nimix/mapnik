@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,27 +24,15 @@
 #define MAPNIK_COLOR_FACTORY_HPP
 
 // mapnik
-#include <mapnik/config.hpp>
+#include <mapnik/color.hpp>
 
-// boost
-#include <boost/utility.hpp>
+//stl
+#include <string>
 
 namespace mapnik {
 
-class color;
+MAPNIK_DECL mapnik::color parse_color(std::string const& str);
 
-template <typename Iterator> struct css_color_grammar;
-class MAPNIK_DECL color_factory : boost::noncopyable
-{
-public:
-
-    static void init_from_string(color & c, std::string const& css_color);
-
-    static bool parse_from_string(color & c, std::string const& css_color,
-                                  mapnik::css_color_grammar<std::string::const_iterator> const& g);
-
-    static color from_string(std::string const& css_color);
-};
 }
 
 #endif // MAPNIK_COLOR_FACTORY_HPP

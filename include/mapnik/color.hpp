@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,123 +27,161 @@
 #include <mapnik/config.hpp>
 #include <mapnik/global.hpp>
 
-//boost
-#include <boost/cstdint.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/operators.hpp>
+#pragma GCC diagnostic pop
 
 // stl
 #include <sstream>
+#include <cstdint>
 
 namespace mapnik {
 
-class MAPNIK_DECL color
-    : boost::equality_comparable<color>
+class MAPNIK_DECL color : boost::equality_comparable<color>
 {
-private:
-    boost::uint8_t red_;
-    boost::uint8_t green_;
-    boost::uint8_t blue_;
-    boost::uint8_t alpha_;
-
 public:
+    std::uint8_t red_;
+    std::uint8_t green_;
+    std::uint8_t blue_;
+    std::uint8_t alpha_;
+    bool premultiplied_;
+
+    // default ctor
     color()
-        : red_(0xff),
+      : red_(0xff),
         green_(0xff),
         blue_(0xff),
-        alpha_(0xff)
+        alpha_(0xff),
+        premultiplied_(false)
         {}
 
-    color(unsigned red, unsigned green, unsigned blue, unsigned alpha = 0xff)
-        :  red_(red),
-        green_(green),
-        blue_(blue),
-        alpha_(alpha)
+    color(std::uint8_t _red, std::uint8_t _green, std::uint8_t _blue, std::uint8_t _alpha = 0xff, bool premultiplied = false)
+      : red_(_red),
+        green_(_green),
+        blue_(_blue),
+        alpha_(_alpha),
+        premultiplied_(premultiplied)
         {}
 
-    color( std::string const& css_string);
+    color(std::uint32_t _rgba, bool premultiplied = false)
+      : red_(_rgba & 0xff),
+        green_((_rgba >> 8) & 0xff),
+        blue_((_rgba >> 16) & 0xff),
+        alpha_((_rgba >> 24) & 0xff),
+        premultiplied_(premultiplied) {}
 
+    // copy ctor
     color(const color& rhs)
-        : red_(rhs.red_),
+      : red_(rhs.red_),
         green_(rhs.green_),
         blue_(rhs.blue_),
-        alpha_(rhs.alpha_)
+        alpha_(rhs.alpha_),
+        premultiplied_(rhs.premultiplied_)
         {}
 
-    color& operator=(const color& rhs)
-        {
-            if (this==&rhs) return *this;
-            red_=rhs.red_;
-            green_=rhs.green_;
-            blue_=rhs.blue_;
-            alpha_=rhs.alpha_;
-            return *this;
-        }
+    // move ctor
+    color(color && rhs)
+        : red_(std::move(rhs.red_)),
+        green_(std::move(rhs.green_)),
+        blue_(std::move(rhs.blue_)),
+        alpha_(std::move(rhs.alpha_)),
+        premultiplied_(std::move(rhs.premultiplied_)) {}
 
-    inline unsigned red() const
-    {
-        return red_;
-    }
+    color( std::string const& str, bool premultiplied = false);
 
-    inline unsigned green() const
-    {
-        return green_;
-    }
-    inline unsigned blue() const
-    {
-        return blue_;
-    }
-    inline unsigned alpha() const
-    {
-        return alpha_;
-    }
+    std::string to_string() const;
+    std::string to_hex_string() const;
+    bool premultiply();
+    bool demultiply();
 
-    inline void set_red(unsigned red)
+    color& operator=(color rhs)
     {
-        red_ = red;
-    }
-    inline void set_green(unsigned green)
-    {
-        green_ = green;
-    }
-
-    inline void set_blue(unsigned blue)
-    {
-        blue_ = blue;
-    }
-    inline void set_alpha(unsigned alpha)
-    {
-        alpha_ = alpha;
-    }
-
-    inline unsigned rgba() const
-    {
-#ifdef MAPNIK_BIG_ENDIAN
-        return (alpha_) | (blue_ << 8) | (green_ << 16) | (red_ << 24) ;
-#else
-        return (alpha_ << 24) | (blue_ << 16) | (green_ << 8) | (red_) ;
-#endif
+        swap(rhs);
+        return *this;
     }
 
     inline bool operator==(color const& rhs) const
     {
         return (red_== rhs.red()) &&
-            (green_ == rhs.green()) &&
-            (blue_  == rhs.blue()) &&
-            (alpha_ == rhs.alpha());
-
+               (green_ == rhs.green()) &&
+               (blue_  == rhs.blue()) &&
+               (alpha_ == rhs.alpha());
     }
 
-    std::string to_string() const;
-    std::string to_hex_string() const;
+    inline std::uint8_t red() const
+    {
+        return red_;
+    }
+
+    inline std::uint8_t green() const
+    {
+        return green_;
+    }
+
+    inline std::uint8_t blue() const
+    {
+        return blue_;
+    }
+
+    inline std::uint8_t alpha() const
+    {
+        return alpha_;
+    }
+
+    inline void set_red(std::uint8_t _red)
+    {
+        red_ = _red;
+    }
+
+    inline void set_green(std::uint8_t _green)
+    {
+        green_ = _green;
+    }
+
+    inline void set_blue(std::uint8_t _blue)
+    {
+        blue_ = _blue;
+    }
+    inline void set_alpha(std::uint8_t _alpha)
+    {
+        alpha_ = _alpha;
+    }
+    inline bool get_premultiplied() const
+    {
+        return premultiplied_;
+    }
+    inline void set_premultiplied(bool status)
+    {
+        premultiplied_ = status;
+    }
+
+    inline unsigned rgba() const
+    {
+        return static_cast<unsigned>((alpha_ << 24) | (blue_ << 16) | (green_ << 8) | (red_)) ;
+    }
+private:
+    void swap(color & rhs)
+    {
+        std::swap(red_, rhs.red_);
+        std::swap(green_,rhs.green_);
+        std::swap(blue_,rhs.blue_);
+        std::swap(alpha_,rhs.alpha_);
+    }
 };
 
 template <typename charT, typename traits>
 std::basic_ostream<charT, traits> &
 operator << ( std::basic_ostream<charT, traits> & s, mapnik::color const& c )
 {
-    std::string hex_string( c.to_string() );
-    s << hex_string;
+    s << c.to_string();
     return s;
+}
+
+// hash
+inline std::size_t hash_value(color const& c)
+{
+    return c.rgba();
 }
 
 }

@@ -2,11 +2,13 @@
 # Mapnik viewer - Copyright (C) 2007 Artem Pavlenko
 ######################################################################
 TEMPLATE = app
-QMAKE_CXX = clang++
-QMAKE_CXXFLAGS += $$system(mapnik-config --cflags)
-QMAKE_LFLAGS += $$system(mapnik-config --libs)
-QMAKE_LFLAGS += $$system(mapnik-config --ldflags --dep-libs)
-
+QT += core gui widgets
+LIBS += $$system(mapnik-config --libs --dep-libs)
+QMAKE_CXX = $$system(mapnik-config --cxx)
+QMAKE_LINK = $$system(mapnik-config --cxx)
+QMAKE_CXXFLAGS += $$system(mapnik-config --cxxflags)
+QMAKE_CXXFLAGS += $$system(mapnik-config --includes --dep-includes --defines)
+QMAKE_LFLAGS += $$system(mapnik-config --ldflags)
 # Input
 
 CONFIG += qt debug_and_release
@@ -19,17 +21,17 @@ HEADERS += mainwindow.hpp \
            layerwidget.hpp \
            layerlistmodel.hpp \
            layerdelegate.hpp \
-           styles_model.hpp 
+           styles_model.hpp
 
 HEADERS += about_dialog.hpp \
            info_dialog.hpp \
            layer_info_dialog.hpp
 
 SOURCES += main.cpp \
-           mainwindow.cpp \ 
+           mainwindow.cpp \
            mapwidget.cpp \
            layerwidget.cpp \
-           layerlistmodel.cpp \ 
+           layerlistmodel.cpp \
            layerdelegate.cpp \
            styles_model.cpp
 

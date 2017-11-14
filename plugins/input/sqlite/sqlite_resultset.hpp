@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,6 +24,7 @@
 #define MAPNIK_SQLITE_RESULTSET_HPP
 
 // mapnik
+#include <mapnik/debug.hpp>
 #include <mapnik/datasource.hpp>
 #include <mapnik/params.hpp>
 
@@ -125,7 +126,7 @@ public:
         return (const char*) sqlite3_column_text (stmt_, col);
     }
 
-    const void* column_blob (int col, int& bytes)
+    const char* column_blob (int col, int& bytes)
     {
         bytes = sqlite3_column_bytes (stmt_, col);
         return (const char*) sqlite3_column_blob (stmt_, col);

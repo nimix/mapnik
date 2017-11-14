@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,13 +24,16 @@
 #define SHAPE_FEATURESET_HPP
 
 //mapnik
-#include <mapnik/geom_util.hpp>
 #include <mapnik/datasource.hpp>
+#include <mapnik/geom_util.hpp>
+#include <mapnik/feature.hpp>
+#include <mapnik/unicode.hpp>
+#include <mapnik/value/types.hpp>
 
 #include "shape_io.hpp"
 
 //boost
-#include <boost/scoped_ptr.hpp>
+
 #include <boost/utility.hpp>
 
 using mapnik::Featureset;
@@ -47,7 +50,6 @@ public:
                      std::string const& shape_file,
                      std::set<std::string> const& attribute_names,
                      std::string const& encoding,
-                     long file_length,
                      int row_limit);
     virtual ~shape_featureset();
     feature_ptr next();
@@ -56,10 +58,11 @@ private:
     filterT filter_;
     shape_io shape_;
     box2d<double> query_ext_;
-    boost::scoped_ptr<transcoder> tr_;
-    long file_length_;
+    mutable box2d<double> feature_bbox_;
+    const std::unique_ptr<transcoder> tr_;
+    long shx_file_length_;
     std::vector<int> attr_ids_;
-    const int row_limit_;
+    mapnik::value_integer row_limit_;
     mutable int count_;
     context_ptr ctx_;
 };

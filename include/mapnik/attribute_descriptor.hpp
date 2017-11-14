@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -46,32 +46,26 @@ public:
                          int precision=-1)
         : name_(name),
           type_(type),
-          primary_key_(primary_key),
           size_(size),
-          precision_(precision) {}
+          precision_(precision),
+            primary_key_(primary_key) {}
 
     attribute_descriptor(attribute_descriptor const& other)
         : name_(other.name_),
           type_(other.type_),
-          primary_key_(other.primary_key_),
           size_(other.size_),
-          precision_(other.precision_) {}
+          precision_(other.precision_),
+          primary_key_(other.primary_key_) {}
 
-    attribute_descriptor& operator=(attribute_descriptor const& other)
+    attribute_descriptor& operator=(attribute_descriptor rhs)
     {
-        if (this == &other)
-        {
-            return *this;
-        }
-        else
-        {
-            name_=other.name_;
-            type_=other.type_;
-            primary_key_=other.primary_key_;
-            size_=other.size_;
-            precision_=other.precision_;
-            return *this;
-        }
+        using std::swap;
+        std::swap(name_, rhs.name_);
+        std::swap(type_, rhs.type_);
+        std::swap(size_, rhs.size_);
+        std::swap(precision_, rhs.precision_);
+        std::swap(primary_key_, rhs.primary_key_);
+        return *this;
     }
 
     std::string const& get_name() const
@@ -79,7 +73,7 @@ public:
         return name_;
     }
 
-    unsigned get_type() const
+    unsigned int get_type() const
     {
         return type_;
     }
@@ -101,23 +95,11 @@ public:
 
 private:
     std::string name_;
-    int type_;
-    bool primary_key_;
+    unsigned int type_;
     int size_;
     int precision_;
+    bool primary_key_;
 };
-
-template <typename charT,typename traits>
-inline std::basic_ostream<charT,traits>&
-operator << (std::basic_ostream<charT,traits>& out,
-             attribute_descriptor const& ad)
-{
-    out << "name=" << ad.get_name() << "\n";
-    out << "type=" << ad.get_type() << "\n";
-    out << "size=" << ad.get_size() << "\n";
-    return out;
-}
-
 
 }
 

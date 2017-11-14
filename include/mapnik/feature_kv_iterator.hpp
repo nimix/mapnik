@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,15 +26,19 @@
 // mapnik
 #include <mapnik/config.hpp>
 #include <mapnik/value.hpp>
-// boost
-#include <boost/tuple/tuple.hpp>
+#include <mapnik/util/variant.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/iterator/iterator_traits.hpp>
 #include <boost/iterator/iterator_facade.hpp>
+#include <boost/iterator/iterator_adaptor.hpp>
 #include <boost/iterator/filter_iterator.hpp>
-#include <boost/variant.hpp>
+#pragma GCC diagnostic pop
+
 // stl
 #include <map>
-
+#include <tuple>
 
 namespace mapnik {
 
@@ -42,12 +46,11 @@ class feature_impl;
 
 class MAPNIK_DECL feature_kv_iterator :
         public boost::iterator_facade<feature_kv_iterator,
-                                      boost::tuple<std::string , value> const,
+                                      std::tuple<std::string, value> const,
                                       boost::forward_traversal_tag>
 {
 public:
-    typedef boost::tuple<std::string,value> value_type;
-
+    using value_type = std::tuple<std::string,value>;
     feature_kv_iterator (feature_impl const& f, bool begin = false);
 private:
     friend class boost::iterator_core_access;
@@ -68,13 +71,12 @@ struct value_not_null
 {
     bool operator() (feature_kv_iterator::value_type const& kv) const
     {
-        return !boost::apply_visitor(is_null, boost::get<1>(kv).base());
+        return !util::apply_visitor(mapnik::detail::is_null_visitor(), std::get<1>(kv));
     }
 };
 
-typedef boost::filter_iterator<value_not_null, feature_kv_iterator> feature_kv_iterator2;
+using feature_kv_iterator2 = boost::filter_iterator<value_not_null, feature_kv_iterator>;
 
 }
 
 #endif // MAPNIK_FEATURE_KV_ITERATOR_HPP
-

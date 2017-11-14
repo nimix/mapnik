@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,185 +20,152 @@
  *
  *****************************************************************************/
 
+#if defined(GRID_RENDERER)
+
+/*
+
+porting notes -->
+
+ - rasterizer -> grid_rasterizer
+ - current_buffer_ -> pixmap_
+ - agg::rendering_buffer -> grid_renderering_buffer
+ - no gamma
+ - agg::scanline_bin sl
+ - grid_rendering_buffer
+ - agg::renderer_scanline_bin_solid
+ - TODO - clamp sizes to > 4 pixels of interactivity
+ - svg_renderer.render_id
+ - only encode feature if placements are found:
+    if (placed)
+    {
+        pixmap_.add_feature(feature);
+    }
+
+*/
+
 // mapnik
-#include <mapnik/debug.hpp>
 #include <mapnik/grid/grid_rasterizer.hpp>
 #include <mapnik/grid/grid_renderer.hpp>
-#include <mapnik/grid/grid_pixfmt.hpp>
-#include <mapnik/grid/grid_pixel.hpp>
+#include <mapnik/grid/grid_renderer_base.hpp>
+#include <mapnik/grid/grid_render_marker.hpp>
 #include <mapnik/grid/grid.hpp>
-#include <mapnik/marker.hpp>
-#include <mapnik/marker_cache.hpp>
-#include <mapnik/marker_helpers.hpp>
-#include <mapnik/markers_symbolizer.hpp>
-#include <mapnik/expression_evaluator.hpp>
-#include <mapnik/marker_cache.hpp>
-#include <mapnik/svg/svg_renderer.hpp>
+#include <mapnik/svg/svg_renderer_agg.hpp>
+#include <mapnik/svg/svg_storage.hpp>
 #include <mapnik/svg/svg_path_adapter.hpp>
-#include <mapnik/markers_placement.hpp>
+#include <mapnik/svg/svg_path_attributes.hpp>
+#include <mapnik/renderer_common/render_markers_symbolizer.hpp>
 
-// agg
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_basics.h"
 #include "agg_rendering_buffer.h"
-#include "agg_pixfmt_rgba.h"
 #include "agg_rasterizer_scanline_aa.h"
-#include "agg_scanline_u.h"
-#include "agg_path_storage.h"
-#include "agg_conv_clip_polyline.h"
-#include "agg_conv_transform.h"
-
-// boost
-#include <boost/optional.hpp>
-
-// stl
-#include <algorithm>
-
+#pragma GCC diagnostic pop
 
 namespace mapnik {
+
+namespace detail {
+
+template <typename SvgRenderer, typename ScanlineRenderer,
+          typename BufferType, typename RasterizerType, typename PixMapType>
+struct grid_markers_renderer_context : markers_renderer_context
+{
+    using renderer_base = typename SvgRenderer::renderer_base;
+    using vertex_source_type = typename SvgRenderer::vertex_source_type;
+    using attribute_source_type = typename SvgRenderer::attribute_source_type;
+    using pixfmt_type = typename renderer_base::pixfmt_type;
+
+    grid_markers_renderer_context(feature_impl const& feature,
+                                  BufferType & buf,
+                                  RasterizerType & ras,
+                                  PixMapType & pixmap)
+      : feature_(feature),
+        buf_(buf),
+        pixf_(buf_),
+        renb_(pixf_),
+        ras_(ras),
+        pixmap_(pixmap),
+        placed_(false)
+    {}
+
+    virtual void render_marker(svg_path_ptr const& src,
+                               svg_path_adapter & path,
+                               svg_attribute_type const& attrs,
+                               markers_dispatch_params const& params,
+                               agg::trans_affine const& marker_tr)
+    {
+        SvgRenderer svg_renderer_(path, attrs);
+        agg::scanline_bin sl_;
+        svg_renderer_.render_id(ras_, sl_, renb_, feature_.id(), marker_tr,
+                                params.opacity, src->bounding_box());
+        place_feature();
+    }
+
+    virtual void render_marker(image_rgba8 const& src,
+                               markers_dispatch_params const& params,
+                               agg::trans_affine const& marker_tr)
+    {
+        // In the long term this should be a visitor pattern based on the type of
+        // render src provided that converts the destination pixel type required.
+        render_raster_marker(ScanlineRenderer(renb_), ras_, src, feature_,
+                             marker_tr, params.opacity);
+        place_feature();
+    }
+
+    void place_feature()
+    {
+        if (!placed_)
+        {
+            pixmap_.add_feature(feature_);
+            placed_ = true;
+        }
+    }
+
+private:
+    feature_impl const& feature_;
+    BufferType & buf_;
+    pixfmt_type pixf_;
+    renderer_base renb_;
+    RasterizerType & ras_;
+    PixMapType & pixmap_;
+    bool placed_;
+};
+
+} // namespace detail
 
 template <typename T>
 void grid_renderer<T>::process(markers_symbolizer const& sym,
                                mapnik::feature_impl & feature,
                                proj_transform const& prj_trans)
 {
-    typedef agg::renderer_base<mapnik::pixfmt_gray32> renderer_base;
-    typedef agg::renderer_scanline_bin_solid<renderer_base> renderer_type;
+    using buf_type = grid_rendering_buffer;
+    using pixfmt_type = typename grid_renderer_base_type::pixfmt_type;
+    using renderer_type = agg::renderer_scanline_bin_solid<grid_renderer_base_type>;
 
-    std::string filename = path_processor_type::evaluate(*sym.get_filename(), feature);
+    using namespace mapnik::svg;
+    using svg_renderer_type = svg_renderer_agg<svg_path_adapter,
+                                               svg_attribute_type,
+                                               renderer_type,
+                                               pixfmt_type>;
 
-    if (!filename.empty())
-    {
-        boost::optional<marker_ptr> mark = mapnik::marker_cache::instance()->find(filename, true);
-        if (mark && *mark)
-        {
-            if (!(*mark)->is_vector())
-            {
-                MAPNIK_LOG_DEBUG(agg_renderer) << "agg_renderer: markers_symbolizer does not yet support non-SVG markers";
-                return;
-            }
+    buf_type render_buf(pixmap_.raw_data(), common_.width_, common_.height_, common_.width_);
+    ras_ptr->reset();
+    box2d<double> clip_box = common_.query_extent_;
 
-            ras_ptr->reset();
-            agg::scanline_bin sl;
-            grid_rendering_buffer buf(pixmap_.raw_data(), width_, height_, width_);
-            mapnik::pixfmt_gray32 pixf(buf);
-            renderer_base renb(pixf);
-            renderer_type ren(renb);
+    using renderer_context_type = detail::grid_markers_renderer_context<svg_renderer_type,
+                                                               renderer_type,
+                                                               buf_type,
+                                                               grid_rasterizer,
+                                                               buffer_type>;
+    renderer_context_type renderer_context(feature, render_buf, *ras_ptr, pixmap_);
 
-            agg::trans_affine geom_tr;
-            evaluate_transform(geom_tr, feature, sym.get_transform());
-
-            boost::optional<path_ptr> marker = (*mark)->get_vector_data();
-            box2d<double> const& bbox = (*marker)->bounding_box();
-
-            agg::trans_affine tr;
-            setup_label_transform(tr, bbox, feature, sym);
-            // - clamp sizes to > 4 pixels of interactivity
-            if (tr.scale() < 0.5)
-            {
-                agg::trans_affine tr2;
-                tr2 *= agg::trans_affine_scaling(0.5);
-                tr = tr2;
-            }
-            tr *= agg::trans_affine_scaling(scale_factor_*(1.0/pixmap_.get_resolution()));
-
-            coord2d center = bbox.center();
-            agg::trans_affine_translation recenter(-center.x, -center.y);
-            agg::trans_affine marker_trans = recenter * tr;
-
-            using namespace mapnik::svg;
-            vertex_stl_adapter<svg_path_storage> stl_storage((*marker)->source());
-            svg_path_adapter svg_path(stl_storage);
-
-            agg::pod_bvector<path_attributes> attributes;
-            bool result = push_explicit_style( (*marker)->attributes(), attributes, sym);
-
-            svg_renderer<svg_path_adapter,
-                         agg::pod_bvector<path_attributes>,
-                         renderer_type,
-                         mapnik::pixfmt_gray32 > svg_renderer(svg_path, result ? attributes : (*marker)->attributes());
-
-            marker_placement_e placement_method = sym.get_marker_placement();
-
-            bool placed = false;
-            BOOST_FOREACH( geometry_type & geom, feature.paths())
-            {
-                // TODO - merge this code with point_symbolizer rendering
-                if (placement_method == MARKER_POINT_PLACEMENT || geom.size() <= 1)
-                {
-                    double x;
-                    double y;
-                    double z=0;
-                    label::interior_position(geom, x, y);
-                    prj_trans.backward(x,y,z);
-                    t_.forward(&x,&y);
-                    geom_tr.transform(&x,&y);
-                    agg::trans_affine matrix = marker_trans;
-                    matrix.translate(x,y);
-                    box2d<double> transformed_bbox = bbox * matrix;
-
-                    if (sym.get_allow_overlap() ||
-                        detector_.has_placement(transformed_bbox))
-                    {
-                        placed = true;
-                        svg_renderer.render_id(*ras_ptr, sl, renb, feature.id(), matrix, sym.get_opacity(), bbox);
-                        if (!sym.get_ignore_placement())
-                            detector_.insert(transformed_bbox);
-                    }
-                }
-                else if (sym.clip())
-                {
-                    typedef agg::conv_clip_polyline<geometry_type> clipped_geometry_type;
-                    typedef coord_transform<CoordTransform,clipped_geometry_type> path_type;
-                    typedef agg::conv_transform<path_type, agg::trans_affine> transformed_path_type;
-
-                    clipped_geometry_type clipped(geom);
-                    clipped.clip_box(query_extent_.minx(),query_extent_.miny(),query_extent_.maxx(),query_extent_.maxy());
-                    path_type path(t_,clipped,prj_trans);
-                    transformed_path_type path_transformed(path,geom_tr);
-                    markers_placement<transformed_path_type, label_collision_detector4> placement(path_transformed, bbox, marker_trans, detector_,
-                                                                                                  sym.get_spacing() * scale_factor_,
-                                                                                                  sym.get_max_error(),
-                                                                                                  sym.get_allow_overlap());
-                    double x, y, angle;
-                    while (placement.get_point(x, y, angle))
-                    {
-                        placed = true;
-                        agg::trans_affine matrix = marker_trans;
-                        matrix.rotate(angle);
-                        matrix.translate(x, y);
-                        svg_renderer.render_id(*ras_ptr, sl, renb, feature.id(), matrix, sym.get_opacity(), bbox);
-                    }
-                }
-                else
-                {
-                    typedef coord_transform<CoordTransform,geometry_type> path_type;
-                    typedef agg::conv_transform<path_type, agg::trans_affine> transformed_path_type;
-                    path_type path(t_,geom,prj_trans);
-                    transformed_path_type path_transformed(path,geom_tr);
-                    markers_placement<transformed_path_type, label_collision_detector4> placement(path_transformed, bbox, marker_trans, detector_,
-                                                                                                  sym.get_spacing() * scale_factor_,
-                                                                                                  sym.get_max_error(),
-                                                                                                  sym.get_allow_overlap());
-                    double x, y, angle;
-                    while (placement.get_point(x, y, angle))
-                    {
-                        placed = true;
-                        agg::trans_affine matrix = marker_trans;
-                        matrix.rotate(angle);
-                        matrix.translate(x, y);
-                        svg_renderer.render_id(*ras_ptr, sl, renb, feature.id(), matrix, sym.get_opacity(), bbox);
-                    }
-                }
-            }
-            if (placed)
-            {
-                pixmap_.add_feature(feature);
-            }
-        }
-    }
+    render_markers_symbolizer(
+        sym, feature, prj_trans, common_, clip_box, renderer_context);
 }
 
 template void grid_renderer<grid>::process(markers_symbolizer const&,
                                            mapnik::feature_impl &,
                                            proj_transform const&);
-}
+} // namespace mapnik
+
+#endif

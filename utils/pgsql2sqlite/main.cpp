@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2009 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,7 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
-//$Id$
 
 // mapnik
 #include "pgsql2sqlite.hpp"
@@ -27,10 +26,13 @@
 #include <mapnik/wkb.hpp>
 #include "connection_manager.hpp"
 
-// boost
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/optional.hpp>
-#include <boost/shared_ptr.hpp>
 #include <boost/program_options.hpp>
+#pragma GCC diagnostic pop
+
+#include <memory>
 
 //stl
 #include <iostream>
@@ -97,7 +99,7 @@ int main ( int argc, char** argv)
         ConnectionCreator<Connection> creator(host,port,dbname,user,password,connect_timeout);
         try
         {
-            boost::shared_ptr<Connection> conn(creator());
+            std::shared_ptr<Connection> conn(creator());
 
             std::string query = vm["query"].as<std::string>();
             std::string output_table_name = vm.count("table") ? vm["table"].as<std::string>() : mapnik::sql_utils::table_from_sql(query);

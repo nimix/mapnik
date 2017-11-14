@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,34 +25,40 @@
 
 // mapnik
 #include <mapnik/config.hpp>
-#include <mapnik/utils.hpp>
+#include <mapnik/util/singleton.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
-// boost
-#include <boost/utility.hpp>
-#include <boost/unordered_map.hpp>
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/shared_ptr.hpp>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/optional.hpp>
+#pragma GCC diagnostic pop
+
+
+namespace boost { namespace interprocess { class mapped_region; } }
 
 namespace mapnik
 {
 
-using namespace boost::interprocess;
+using mapped_region_ptr = std::shared_ptr<boost::interprocess::mapped_region>;
 
-typedef boost::shared_ptr<mapped_region> mapped_region_ptr;
-
-struct MAPNIK_DECL mapped_memory_cache :
-        public singleton <mapped_memory_cache, CreateStatic>,
-        private boost::noncopyable
+class MAPNIK_DECL mapped_memory_cache :
+        public singleton<mapped_memory_cache, CreateStatic>,
+        private util::noncopyable
 {
     friend class CreateStatic<mapped_memory_cache>;
-    static boost::unordered_map<std::string,mapped_region_ptr> cache_;
-    static bool insert(std::string const& key, mapped_region_ptr);
-    static boost::optional<mapped_region_ptr> find(std::string const& key, bool update_cache = false);
-    static void clear();
+    std::unordered_map<std::string,mapped_region_ptr> cache_;
+public:
+    bool insert(std::string const& key, mapped_region_ptr);
+    boost::optional<mapped_region_ptr> find(std::string const& key, bool update_cache = false);
+    void clear();
 };
+
+extern template class MAPNIK_DECL singleton<mapped_memory_cache, CreateStatic>;
 
 }
 
 #endif // MAPNIK_MAPPED_MEMORY_CACHE_HPP
-

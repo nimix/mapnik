@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,12 +23,16 @@
 #ifndef MAPNIK_GRID_RASTERIZER_HPP
 #define MAPNIK_GRID_RASTERIZER_HPP
 
-#include <boost/utility.hpp>
+#include <mapnik/util/noncopyable.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_rasterizer_scanline_aa.h"
+#pragma GCC diagnostic pop
 
 namespace mapnik {
 
-struct grid_rasterizer :  agg::rasterizer_scanline_aa<>, boost::noncopyable {};
+struct grid_rasterizer :  agg::rasterizer_scanline_aa<>, util::noncopyable {};
 
 }
 

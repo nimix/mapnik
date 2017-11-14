@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,10 +22,16 @@
 
 // mapnik
 #include <mapnik/debug.hpp>
+#include <mapnik/value/types.hpp>
+#include <mapnik/value.hpp> // for to_double
+#include <mapnik/feature.hpp>
+#include <mapnik/raster.hpp>
 #include <mapnik/raster_colorizer.hpp>
+#include <mapnik/enumeration.hpp>
 
 // stl
 #include <limits>
+#include <cmath>
 
 namespace mapnik
 {
@@ -42,10 +48,10 @@ static const char *colorizer_mode_strings[] = {
 IMPLEMENT_ENUM( colorizer_mode, colorizer_mode_strings )
 
 
-colorizer_stop::colorizer_stop(float value, colorizer_mode mode,
+colorizer_stop::colorizer_stop(float val, colorizer_mode mode,
                                color const& _color,
                                std::string const& label)
-: value_(value)
+: value_(val)
     , mode_(mode)
     , color_(_color)
     , label_(label)
@@ -116,55 +122,53 @@ bool raster_colorizer::add_stop(colorizer_stop const& stop)
     return true;
 }
 
-void raster_colorizer::colorize(raster_ptr const& raster, Feature const& f) const
+template <typename T>
+void raster_colorizer::colorize(image_rgba8 & out, T const& in,
+                                boost::optional<double> const& nodata,
+                                feature_impl const& f) const
 {
-    unsigned *imageData = raster->data_.getData();
-
-    int len = raster->data_.width() * raster->data_.height();
-
-    bool hasNoData = false;
-    float noDataValue = 0;
-
-    //std::map<std::string,value>::const_iterator fi = Props.find("NODATA");
-    if (f.has_key("NODATA"))
-    {
-        hasNoData = true;
-        noDataValue = static_cast<float>(f.get("NODATA").to_double());
-    }
-
+    using image_type = T;
+    using pixel_type = typename image_type::pixel_type;
+    // TODO: assuming in/out have the same width/height for now
+    std::uint32_t * out_data = out.data();
+    pixel_type const* in_data = in.data();
+    int len = out.width() * out.height();
     for (int i=0; i<len; ++i)
     {
-        // the GDAL plugin reads single bands as floats
-        float value = *reinterpret_cast<float *> (&imageData[i]);
-        if (hasNoData && noDataValue == value)
-            imageData[i] = color(0,0,0,0).rgba();
+        pixel_type val = in_data[i];
+        if (nodata && (std::fabs(val - *nodata) < epsilon_))
+        {
+            out_data[i] = 0; // rgba(0,0,0,0)
+        }
         else
-            imageData[i] = get_color(value).rgba();
+        {
+            out_data[i] = get_color(val);
+        }
     }
 }
 
 inline unsigned interpolate(unsigned start, unsigned end, float fraction)
 {
-    return static_cast<unsigned>(fraction * ((float)end - (float)start) + start);
+    return static_cast<unsigned>(fraction * (static_cast<float>(end) - static_cast<float>(start)) + static_cast<float>(start));
 }
 
-color raster_colorizer::get_color(float value) const
+unsigned raster_colorizer::get_color(float val) const
 {
     int stopCount = stops_.size();
 
     //use default color if no stops
-    if(stopCount == 0)
+    if (stopCount == 0)
     {
-        return default_color_;
+        return default_color_.rgba();
     }
 
-    //1 - Find the stop that the value is in
+    //1 - Find the stop that the val is in
     int stopIdx = -1;
     bool foundStopIdx = false;
 
     for(int i=0; i<stopCount; ++i)
     {
-        if(value < stops_[i].get_value())
+        if (val < stops_[i].get_value())
         {
             stopIdx = i-1;
             foundStopIdx = true;
@@ -211,7 +215,7 @@ color raster_colorizer::get_color(float value) const
     {
         stopColor = default_color_;
         nextStopColor = stops_[nextStopIdx].get_color();
-        stopValue = value;
+        stopValue = val;
         nextStopValue = stops_[nextStopIdx].get_value();
     }
     else
@@ -233,7 +237,7 @@ color raster_colorizer::get_color(float value) const
         }
         else
         {
-            float fraction = (value - stopValue) / (nextStopValue - stopValue);
+            float fraction = (val - stopValue) / (nextStopValue - stopValue);
 
             unsigned r = interpolate(stopColor.red(), nextStopColor.red(),fraction);
             unsigned g = interpolate(stopColor.green(), nextStopColor.green(),fraction);
@@ -254,7 +258,7 @@ color raster_colorizer::get_color(float value) const
     case COLORIZER_EXACT:
     default:
         //approximately equal (within epsilon)
-        if(fabs(value - stopValue) < epsilon_)
+        if (std::fabs(val - stopValue) < epsilon_)
         {
             outputColor = stopColor;
         }
@@ -267,7 +271,7 @@ color raster_colorizer::get_color(float value) const
 
 
     /*
-      MAPNIK_LOG_DEBUG(raster_colorizer) << "raster_colorizer: get_color " << value;
+      MAPNIK_LOG_DEBUG(raster_colorizer) << "raster_colorizer: get_color " << val;
       MAPNIK_LOG_DEBUG(raster_colorizer) << "\tstopIdx: " << stopIdx;
       MAPNIK_LOG_DEBUG(raster_colorizer) << "\tnextStopIdx: " << nextStopIdx;
       MAPNIK_LOG_DEBUG(raster_colorizer) << "\tstopValue: " << stopValue;
@@ -278,9 +282,39 @@ color raster_colorizer::get_color(float value) const
       MAPNIK_LOG_DEBUG(raster_colorizer) << "\toutputColor: " << outputColor.to_string();
     */
 
-    return outputColor;
+    return outputColor.rgba();
 }
 
 
-}
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray8 const& in,
+                                boost::optional<double>const& nodata,
+                                feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray8s const& in,
+                                boost::optional<double>const& nodata,
+                                feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray16 const& in,
+                                boost::optional<double>const& nodata,
+                                feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray16s const& in,
+                                boost::optional<double>const& nodata,
+                                feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray32 const& in,
+                                         boost::optional<double>const& nodata,
+                                         feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray32s const& in,
+                                         boost::optional<double>const& nodata,
+                                         feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray32f const& in,
+                                         boost::optional<double>const& nodata,
+                                         feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray64 const& in,
+                                         boost::optional<double>const& nodata,
+                                         feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray64s const& in,
+                                         boost::optional<double>const& nodata,
+                                         feature_impl const& f) const;
+template void raster_colorizer::colorize(image_rgba8 & out, image_gray64f const& in,
+                                         boost::optional<double>const& nodata,
+                                         feature_impl const& f) const;
 
+}

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,12 +24,16 @@
 #define MAPNIK_SVG_PATH_ADAPTER_HPP
 
 // mapnik
-#include <boost/utility.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/geometry/box2d.hpp>
+#include <mapnik/safe_cast.hpp>
 
-// agg
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_math.h"
 #include "agg_array.h"
 #include "agg_bezier_arc.h"
+#pragma GCC diagnostic pop
 
 // stl
 #include <cmath>
@@ -40,20 +44,20 @@ namespace svg {
 
 using namespace agg;
 
-template<class VertexContainer> class path_adapter : boost::noncopyable
+template<class VertexContainer> class path_adapter : util::noncopyable
 {
 public:
-    typedef VertexContainer            container_type;
-    typedef path_adapter<VertexContainer> self_type;
+    using container_type = VertexContainer;
+    using self_type = path_adapter<VertexContainer>;
 
     //--------------------------------------------------------------------
-    path_adapter(VertexContainer & vertices) : vertices_(vertices), iterator_(0) {}
+    path_adapter(VertexContainer & _vertices) : vertices_(_vertices), iterator_(0) {}
     //void remove_all() { vertices_.remove_all(); iterator_ = 0; }
     //void free_all()   { vertices_.free_all();   iterator_ = 0; }
 
     // Make path functions
     //--------------------------------------------------------------------
-    unsigned start_new_path();
+    std::size_t start_new_path();
 
     void move_to(double x, double y);
     void move_rel(double dx, double dy);
@@ -112,7 +116,7 @@ public:
     const container_type& vertices() const { return vertices_; }
     container_type& vertices()       { return vertices_; }
 
-    unsigned total_vertices() const;
+    std::size_t total_vertices() const;
 
     void rel_to_abs(double* x, double* y) const;
 
@@ -263,7 +267,7 @@ private:
 
 //------------------------------------------------------------------------
 template<class VC>
-unsigned path_adapter<VC>::start_new_path()
+std::size_t path_adapter<VC>::start_new_path()
 {
     if(!is_stop(vertices_.last_command()))
     {
@@ -369,8 +373,8 @@ void path_adapter<VC>::arc_to(double rx, double ry,
         double y0 = 0.0;
         vertices_.last_vertex(&x0, &y0);
 
-        rx = fabs(rx);
-        ry = fabs(ry);
+        rx = std::fabs(rx);
+        ry = std::fabs(ry);
 
         // Ensure radii are valid
         //-------------------------
@@ -547,7 +551,7 @@ inline void path_adapter<VC>::close_polygon(unsigned flags)
 
 //------------------------------------------------------------------------
 template<class VC>
-inline unsigned path_adapter<VC>::total_vertices() const
+inline std::size_t path_adapter<VC>::total_vertices() const
 {
     return vertices_.total_vertices();
 }
@@ -838,12 +842,12 @@ void path_adapter<VC>::translate_all_paths(double dx, double dy)
 }
 
 
-template<class Container> class vertex_stl_adapter : boost::noncopyable
+template<class Container> class vertex_stl_adapter : util::noncopyable
 {
 public:
 
-    typedef typename Container::value_type vertex_type;
-    typedef typename vertex_type::value_type value_type;
+    using vertex_type = typename Container::value_type;
+    using value_type = typename vertex_type::value_type;
 
     explicit vertex_stl_adapter(Container & vertices)
         : vertices_(vertices) {}
@@ -886,7 +890,7 @@ public:
     {
         return vertices_.size() ?
             vertices_[vertices_.size() - 1].cmd :
-            (unsigned)path_cmd_stop;
+            path_cmd_stop;
     }
 
     unsigned last_vertex(double* x, double* y) const
@@ -896,7 +900,7 @@ public:
             *x = *y = 0.0;
             return path_cmd_stop;
         }
-        return vertex(vertices_.size() - 1, x, y);
+        return vertex(safe_cast<unsigned>(vertices_.size() - 1), x, y);
     }
 
     unsigned prev_vertex(double* x, double* y) const
@@ -906,7 +910,7 @@ public:
             *x = *y = 0.0;
             return path_cmd_stop;
         }
-        return vertex(vertices_.size() - 2, x, y);
+        return vertex(safe_cast<unsigned>(vertices_.size() - 2), x, y);
     }
 
     double last_x() const
@@ -919,7 +923,7 @@ public:
         return vertices_.size() ? vertices_[vertices_.size() - 1].y : 0.0;
     }
 
-    unsigned total_vertices() const
+    std::size_t total_vertices() const
     {
         return vertices_.size();
     }
@@ -942,9 +946,9 @@ private:
 };
 
 
-typedef std::vector<vertex_d> svg_path_storage;
+using svg_path_storage = std::vector<vertex_d>;
 
-typedef path_adapter<vertex_stl_adapter<svg_path_storage> > svg_path_adapter;
+using svg_path_adapter = path_adapter<vertex_stl_adapter<svg_path_storage> >;
 
 }}
 

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,10 +24,9 @@
 #define MAPNIK_WKB_HPP
 
 // mapnik
+#include <mapnik/config.hpp>
 #include <mapnik/geometry.hpp>
-
-// boost
-#include <boost/utility.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
 namespace mapnik
 {
@@ -43,22 +42,31 @@ namespace mapnik
  * the Open Geospatial Consortium (OGC) and described in their Simple Feature
  * Access and Coordinate Transformation Service specifications.
  */
-enum wkbFormat
+
+enum wkbFormat : std::uint8_t
 {
     wkbAuto=1,
     wkbGeneric=2,
     wkbSpatiaLite=3
 };
 
-class MAPNIK_DECL geometry_utils : private boost::noncopyable
+enum wkbByteOrder : std::uint8_t
+{
+    wkbXDR=0,
+    wkbNDR=1
+};
+
+class MAPNIK_DECL geometry_utils : private util::noncopyable
 {
 public:
 
-    static bool from_wkb (boost::ptr_vector<geometry_type>& paths,
-                          const char* wkb,
-                          unsigned size,
-                          wkbFormat format = wkbGeneric);
+    static geometry::geometry<double> from_wkb(char const* wkb,
+                                               std::size_t size,
+                                               wkbFormat format = wkbGeneric);
+
+    static geometry::geometry<double> from_twkb(char const* twkb, std::size_t size);
 };
+
 }
 
 #endif // MAPNIK_WKB_HPP

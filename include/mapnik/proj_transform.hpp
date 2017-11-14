@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,25 +24,33 @@
 #define MAPNIK_PROJ_TRANSFORM_HPP
 
 // mapnik
-#include <mapnik/projection.hpp>
-#include <mapnik/box2d.hpp>
-
-// boost
-#include <boost/utility.hpp>
+#include <mapnik/config.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/geometry/point.hpp>
+// stl
+#include <vector>
 
 namespace mapnik {
 
-class MAPNIK_DECL proj_transform : private boost::noncopyable
+class projection;
+template <typename T> class box2d;
+
+class MAPNIK_DECL proj_transform : private util::noncopyable
 {
 public:
     proj_transform(projection const& source,
                    projection const& dest);
 
     bool equal() const;
+    bool is_known() const;
     bool forward (double& x, double& y , double& z) const;
     bool backward (double& x, double& y , double& z) const;
-    bool forward (double *x, double *y , double *z, int point_count) const;
-    bool backward (double *x, double *y , double *z, int point_count) const;
+    bool forward (double *x, double *y , double *z, int point_count, int offset = 1) const;
+    bool backward (double *x, double *y , double *z, int point_count, int offset = 1) const;
+    bool forward (geometry::point<double> & p) const;
+    bool backward (geometry::point<double> & p) const;
+    unsigned int forward (std::vector<geometry::point<double>> & ls) const;
+    unsigned int backward (std::vector<geometry::point<double>> & ls) const;
     bool forward (box2d<double> & box) const;
     bool backward (box2d<double> & box) const;
     bool forward (box2d<double> & box, int points) const;
@@ -51,13 +59,15 @@ public:
     mapnik::projection const& dest() const;
 
 private:
-    projection const source_;
-    projection const dest_;
+    projection const& source_;
+    projection const& dest_;
     bool is_source_longlat_;
     bool is_dest_longlat_;
     bool is_source_equal_dest_;
     bool wgs84_to_merc_;
+    bool merc_to_wgs84_;
 };
+
 }
 
 #endif // MAPNIK_PROJ_TRANSFORM_HPP

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,21 +22,26 @@
 
 // mapnik
 #include <mapnik/debug.hpp>
-#include <mapnik/ctrans.hpp>
+#include <mapnik/image.hpp>
+#include <mapnik/raster.hpp>
+#include <mapnik/view_transform.hpp>
 #include <mapnik/image_reader.hpp>
 #include <mapnik/image_util.hpp>
 #include <mapnik/feature_factory.hpp>
+#include <mapnik/util/variant.hpp>
 
-// boost
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/format.hpp>
+#pragma GCC diagnostic pop
 
 #include "raster_featureset.hpp"
 
 using mapnik::query;
 using mapnik::image_reader;
-using mapnik::Feature;
 using mapnik::feature_ptr;
-using mapnik::image_data_32;
+using mapnik::image_rgba8;
 using mapnik::raster;
 using mapnik::feature_factory;
 
@@ -46,11 +51,12 @@ raster_featureset<LookupPolicy>::raster_featureset(LookupPolicy const& policy,
                                                    query const& q)
     : policy_(policy),
       feature_id_(1),
-      ctx_(boost::make_shared<mapnik::context_type>()),
+      ctx_(std::make_shared<mapnik::context_type>()),
       extent_(extent),
       bbox_(q.get_bbox()),
       curIter_(policy_.begin()),
-      endIter_(policy_.end())
+      endIter_(policy_.end()),
+      filter_factor_(q.get_filter_factor())
 {
 }
 
@@ -68,7 +74,7 @@ feature_ptr raster_featureset<LookupPolicy>::next()
 
         try
         {
-            std::auto_ptr<image_reader> reader(mapnik::get_image_reader(curIter_->file(),curIter_->format()));
+            std::unique_ptr<image_reader> reader(mapnik::get_image_reader(curIter_->file(),curIter_->format()));
 
             MAPNIK_LOG_DEBUG(raster) << "raster_featureset: Reader=" << curIter_->format() << "," << curIter_->file()
                                      << ",size(" << curIter_->width() << "," << curIter_->height() << ")";
@@ -80,41 +86,38 @@ feature_ptr raster_featureset<LookupPolicy>::next()
 
                 if (image_width > 0 && image_height > 0)
                 {
-                    mapnik::CoordTransform t(image_width, image_height, extent_, 0, 0);
+                    mapnik::view_transform t(image_width, image_height, extent_, 0, 0);
                     box2d<double> intersect = bbox_.intersect(curIter_->envelope());
                     box2d<double> ext = t.forward(intersect);
                     box2d<double> rem = policy_.transform(ext);
-                    if (ext.width() > 0.5 && ext.height() > 0.5 )
-                    {
-                        // select minimum raster containing whole ext
-                        int x_off = static_cast<int>(floor(ext.minx()));
-                        int y_off = static_cast<int>(floor(ext.miny()));
-                        int end_x = static_cast<int>(ceil(ext.maxx()));
-                        int end_y = static_cast<int>(ceil(ext.maxy()));
+                    // select minimum raster containing whole ext
+                    int x_off = static_cast<int>(std::floor(ext.minx()));
+                    int y_off = static_cast<int>(std::floor(ext.miny()));
+                    int end_x = static_cast<int>(std::ceil(ext.maxx()));
+                    int end_y = static_cast<int>(std::ceil(ext.maxy()));
 
-                        // clip to available data
-                        if (x_off < 0)
-                            x_off = 0;
-                        if (y_off < 0)
-                            y_off = 0;
-                        if (end_x > image_width)
-                            end_x = image_width;
-                        if (end_y > image_height)
-                            end_y = image_height;
-                        int width = end_x - x_off;
-                        int height = end_y - y_off;
+                    // clip to available data
+                    if (x_off >= image_width) x_off = image_width - 1;
+                    if (y_off >= image_height) y_off = image_height - 1;
+                    if (x_off < 0) x_off = 0;
+                    if (y_off < 0) y_off = 0;
+                    if (end_x > image_width)  end_x = image_width;
+                    if (end_y > image_height) end_y = image_height;
 
-                        // calculate actual box2d of returned raster
-                        box2d<double> feature_raster_extent(rem.minx() + x_off,
-                                                            rem.miny() + y_off,
-                                                            rem.maxx() + x_off + width,
-                                                            rem.maxy() + y_off + height);
-                        intersect = t.backward(feature_raster_extent);
+                    int width = end_x - x_off;
+                    int height = end_y - y_off;
+                    if (width < 1) width = 1;
+                    if (height < 1) height = 1;
 
-                        image_data_32 image(width,height);
-                        reader->read(x_off, y_off, image);
-                        feature->set_raster(boost::make_shared<raster>(intersect, image));
-                    }
+                    // calculate actual box2d of returned raster
+                    box2d<double> feature_raster_extent(rem.minx() + x_off,
+                                                        rem.miny() + y_off,
+                                                        rem.maxx() + x_off + width,
+                                                        rem.maxy() + y_off + height);
+                    feature_raster_extent = t.backward(feature_raster_extent);
+                    mapnik::image_any data = reader->read(x_off, y_off, width, height);
+                    mapnik::raster_ptr raster = std::make_shared<mapnik::raster>(feature_raster_extent, intersect, std::move(data), filter_factor_);
+                    feature->set_raster(raster);
                 }
             }
         }
@@ -142,6 +145,7 @@ std::string tiled_multi_file_policy::interpolate(std::string const& pattern, int
     // TODO: make from some sort of configurable interpolation
     int tms_y = tile_stride_ * ((image_height_ / tile_size_) - y - 1);
     int tms_x = tile_stride_ * x;
+    // TODO - optimize by avoiding boost::format
     std::string xs = (boost::format("%03d/%03d/%03d") % (tms_x / 1000000) % ((tms_x / 1000) % 1000) % (tms_x % 1000)).str();
     std::string ys = (boost::format("%03d/%03d/%03d") % (tms_y / 1000000) % ((tms_y / 1000) % 1000) % (tms_y % 1000)).str();
     std::string rv(pattern);

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,11 +24,15 @@
 #define MAPNIK_GRID_RENDERING_BUFFER_HPP
 
 #include <mapnik/grid/grid.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_rendering_buffer.h"
+#pragma GCC diagnostic pop
 
 namespace mapnik {
 
-typedef agg::row_ptr_cache<mapnik::grid::value_type> grid_rendering_buffer;
+using grid_rendering_buffer = agg::row_ptr_cache<mapnik::grid::value_type>;
 
 }
 

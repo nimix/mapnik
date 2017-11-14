@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2006 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,21 +19,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
-//$Id: ogrindex.cc 27 2005-03-30 21:45:40Z pavlenko $
 
 
 #include <iostream>
 #include <vector>
 #include <string>
 
-#include <boost/tokenizer.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/filesystem/operations.hpp>
 #include <boost/program_options.hpp>
 
 #include <mapnik/datasource.hpp>
-#include <mapnik/box2d.hpp>
+#include <mapnik/geometry/box2d.hpp>
 #include <mapnik/feature.hpp>
+#include <mapnik/util/fs.hpp>
 #include <mapnik/feature_layer_desc.hpp>
 
 #include "../shapeindex/quadtree.hpp"
@@ -125,7 +123,7 @@ int main (int argc,char** argv)
 
         std::string ogrname (*itr++);
 
-        if (! boost::filesystem::exists (ogrname))
+        if (! mapnik::util::exists (ogrname))
         {
             std::clog << "error : file " << ogrname << " doesn't exists" << std::endl;
             continue;
@@ -137,7 +135,7 @@ int main (int argc,char** argv)
         if (breakpoint == string::npos) breakpoint = ogrname.length();
         std::string ogrlayername (ogrname.substr(0, breakpoint));
 
-        if (boost::filesystem::exists (ogrlayername + ".ogrindex"))
+        if (mapnik::util::exists (ogrlayername + ".ogrindex"))
         {
             std::clog << "error : " << ogrlayername << ".ogrindex file already exists for " << ogrname << std::endl;
             continue;
@@ -217,4 +215,3 @@ int main (int argc,char** argv)
     std::clog << "done!" << std::endl;
     return 0;
 }
-

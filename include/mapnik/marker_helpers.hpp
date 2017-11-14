@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,85 +23,165 @@
 #ifndef MAPNIK_MARKER_HELPERS_HPP
 #define MAPNIK_MARKER_HELPERS_HPP
 
-#include <mapnik/color.hpp>
-#include <mapnik/markers_symbolizer.hpp>
-#include <mapnik/expression_evaluator.hpp>
+#include <mapnik/feature.hpp>
+#include <mapnik/geometry.hpp>
+#include <mapnik/geometry/geometry_type.hpp>
+#include <mapnik/geometry/centroid.hpp>
+#include <mapnik/symbolizer.hpp>
 #include <mapnik/svg/svg_path_attributes.hpp>
+#include <mapnik/marker.hpp> // for svg_storage_type
+#include <mapnik/markers_placement.hpp>
+#include <mapnik/attribute.hpp>
+#include <mapnik/geometry/box2d.hpp>
+#include <mapnik/vertex_processor.hpp>
+#include <mapnik/renderer_common/apply_vertex_converter.hpp>
+#include <mapnik/renderer_common/render_markers_symbolizer.hpp>
+#include <mapnik/vertex_converters.hpp>
 
-// boost
-#include <boost/optional.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
+#include "agg_trans_affine.h"
+#pragma GCC diagnostic pop
+
+// stl
+#include <memory>
 
 namespace mapnik {
 
-template <typename Attr>
-bool push_explicit_style(Attr const& src, Attr & dst, markers_symbolizer const& sym)
+struct clip_poly_tag;
+
+template <typename Detector>
+struct vector_markers_dispatch : util::noncopyable
 {
-    boost::optional<stroke> const& strk = sym.get_stroke();
-    boost::optional<color> const& fill = sym.get_fill();
-    if (strk || fill)
+    vector_markers_dispatch(svg_path_ptr const& src,
+                            svg_path_adapter & path,
+                            svg_attribute_type const& attrs,
+                            agg::trans_affine const& marker_trans,
+                            symbolizer_base const& sym,
+                            Detector & detector,
+                            double scale_factor,
+                            feature_impl const& feature,
+                            attributes const& vars,
+                            bool snap_to_pixels,
+                            markers_renderer_context & renderer_context)
+        : params_(src->bounding_box(), recenter(src) * marker_trans,
+                  sym, feature, vars, scale_factor, snap_to_pixels)
+        , renderer_context_(renderer_context)
+        , src_(src)
+        , path_(path)
+        , attrs_(attrs)
+        , detector_(detector)
+    {}
+
+    template <typename T>
+    void add_path(T & path)
     {
-        for(unsigned i = 0; i < src.size(); ++i)
+        markers_placement_finder<T, Detector> placement_finder(
+            params_.placement_method, path, detector_, params_.placement_params);
+        double x, y, angle = .0;
+        while (placement_finder.get_point(x, y, angle, params_.ignore_placement))
         {
-            mapnik::svg::path_attributes attr = src[i];
-
-            if (strk)
-            {
-                attr.stroke_flag = true;
-                attr.stroke_width = strk->get_width();
-                color const& s_color = strk->get_color();
-                attr.stroke_color = agg::rgba(s_color.red()/255.0,s_color.green()/255.0,
-                                              s_color.blue()/255.0,(s_color.alpha()*strk->get_opacity())/255.0);
-            }
-            if (fill)
-            {
-
-                attr.fill_flag = true;
-                color const& f_color = *fill;
-                attr.fill_color = agg::rgba(f_color.red()/255.0,f_color.green()/255.0,
-                                            f_color.blue()/255.0,(f_color.alpha()*sym.get_opacity())/255.0);
-            }
-            dst.push_back(attr);
+            agg::trans_affine matrix = params_.placement_params.tr;
+            matrix.rotate(angle);
+            matrix.translate(x, y);
+            renderer_context_.render_marker(src_, path_, attrs_, params_, matrix);
         }
-        return true;
     }
-    return false;
-}
 
-template <typename T>
-void setup_label_transform(agg::trans_affine & tr, box2d<double> const& bbox, mapnik::feature_impl const& feature, T const& sym)
+protected:
+    static agg::trans_affine recenter(svg_path_ptr const& src)
+    {
+        coord2d center = src->bounding_box().center();
+        return agg::trans_affine_translation(-center.x, -center.y);
+    }
+
+    markers_dispatch_params params_;
+    markers_renderer_context & renderer_context_;
+    svg_path_ptr const& src_;
+    svg_path_adapter & path_;
+    svg_attribute_type const& attrs_;
+    Detector & detector_;
+};
+
+template <typename Detector>
+struct raster_markers_dispatch : util::noncopyable
 {
-    double width = 0;
-    double height = 0;
+    raster_markers_dispatch(image_rgba8 const& src,
+                            agg::trans_affine const& marker_trans,
+                            symbolizer_base const& sym,
+                            Detector & detector,
+                            double scale_factor,
+                            feature_impl const& feature,
+                            attributes const& vars,
+                            markers_renderer_context & renderer_context)
+        : params_(box2d<double>(0, 0, src.width(), src.height()),
+                  marker_trans, sym, feature, vars, scale_factor)
+        , renderer_context_(renderer_context)
+        , src_(src)
+        , detector_(detector)
+    {}
 
-    expression_ptr const& width_expr = sym.get_width();
-    if (width_expr)
-        width = boost::apply_visitor(evaluate<Feature,value_type>(feature), *width_expr).to_double();
+    template <typename T>
+    void add_path(T & path)
+    {
+        markers_placement_finder<T, Detector> placement_finder(
+            params_.placement_method, path, detector_, params_.placement_params);
+        double x, y, angle = .0;
+        while (placement_finder.get_point(x, y, angle, params_.ignore_placement))
+        {
+            agg::trans_affine matrix = params_.placement_params.tr;
+            matrix.rotate(angle);
+            matrix.translate(x, y);
+            renderer_context_.render_marker(src_, params_, matrix);
+        }
+    }
 
-    expression_ptr const& height_expr = sym.get_height();
-    if (height_expr)
-        height = boost::apply_visitor(evaluate<Feature,value_type>(feature), *height_expr).to_double();
+protected:
+    markers_dispatch_params params_;
+    markers_renderer_context & renderer_context_;
+    image_rgba8 const& src_;
+    Detector & detector_;
+};
 
-    if (width > 0 && height > 0)
-    {
-        double sx = width/bbox.width();
-        double sy = height/bbox.height();
-        tr *= agg::trans_affine_scaling(sx,sy);
-    }
-    else if (width > 0)
-    {
-        double sx = width/bbox.width();
-        tr *= agg::trans_affine_scaling(sx);
-    }
-    else if (height > 0)
-    {
-        double sy = height/bbox.height();
-        tr *= agg::trans_affine_scaling(sy);
-    }
-    else
-    {
-        evaluate_transform(tr, feature, sym.get_image_transform());
-    }
-}
+void build_ellipse(symbolizer_base const& sym, mapnik::feature_impl & feature, attributes const& vars,
+                   svg_storage_type & marker_ellipse, svg::svg_path_adapter & svg_path);
+
+bool push_explicit_style(svg_attribute_type const& src,
+                         svg_attribute_type & dst,
+                         symbolizer_base const& sym,
+                         feature_impl & feature,
+                         attributes const& vars);
+
+void setup_transform_scaling(agg::trans_affine & tr,
+                             double svg_width,
+                             double svg_height,
+                             mapnik::feature_impl & feature,
+                             attributes const& vars,
+                             symbolizer_base const& sym);
+
+using vertex_converter_type = vertex_converter<clip_line_tag,
+                                               clip_poly_tag,
+                                               transform_tag,
+                                               affine_transform_tag,
+                                               simplify_tag,
+                                               smooth_tag,
+                                               offset_transform_tag>;
+
+// Apply markers to a feature with multiple geometries
+template <typename Processor>
+void apply_markers_multi(feature_impl const& feature, attributes const& vars,
+                         vertex_converter_type & converter, Processor & proc, symbolizer_base const& sym);
+
+
+using vector_dispatch_type = vector_markers_dispatch<mapnik::label_collision_detector4>;
+using raster_dispatch_type = raster_markers_dispatch<mapnik::label_collision_detector4>;
+
+extern template void apply_markers_multi<vector_dispatch_type>(feature_impl const& feature, attributes const& vars,
+                         vertex_converter_type & converter, vector_dispatch_type & proc, symbolizer_base const& sym);
+
+extern template void apply_markers_multi<raster_dispatch_type>(feature_impl const& feature, attributes const& vars,
+                         vertex_converter_type & converter, raster_dispatch_type & proc, symbolizer_base const& sym);
+
 
 }
 

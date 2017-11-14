@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,40 +24,14 @@
 #define MAPNIK_WKT_FACTORY_HPP
 
 // mapnik
-#include <mapnik/config.hpp>
 #include <mapnik/geometry.hpp>
-// boost
-#include <boost/utility.hpp>
-#include <boost/ptr_container/ptr_vector.hpp>
-#include <boost/scoped_ptr.hpp>
-#include <boost/version.hpp>
-
 // stl
 #include <string>
 
 namespace mapnik {
 
-namespace wkt {
-template <typename Iterator> struct wkt_collection_grammar;
-}
-
-MAPNIK_DECL bool from_wkt(std::string const& wkt, boost::ptr_vector<geometry_type> & paths);
-
-#if BOOST_VERSION >= 104700
-
-class wkt_parser : boost::noncopyable
-{
-    typedef std::string::const_iterator iterator_type;
-public:
-    wkt_parser();
-    bool parse(std::string const& wkt, boost::ptr_vector<geometry_type> & paths);
-private:
-    boost::scoped_ptr<mapnik::wkt::wkt_collection_grammar<iterator_type> > grammar_;
-};
-
-#endif
+bool from_wkt(std::string const& wkt, mapnik::geometry::geometry<double> & geom);
 
 }
-
 
 #endif // MAPNIK_WKT_FACTORY_HPP

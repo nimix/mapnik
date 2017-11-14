@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,42 +24,76 @@
 #define CONTAINER_ADAPTER_HPP
 
 // mapnik
-#include <mapnik/global.hpp>
-#include <mapnik/geometry.hpp>
-#include <mapnik/util/vertex_iterator.hpp>
+#include <mapnik/util/path_iterator.hpp>
 
-// boost
-#include <boost/tuple/tuple.hpp>
-#include <boost/spirit/include/karma.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/spirit/include/support_container.hpp>
+#pragma GCC diagnostic pop
 
 namespace boost { namespace spirit { namespace traits {
 
 template <>
-struct is_container<mapnik::geometry_type const> : mpl::true_ {} ;
+struct is_container<mapnik::path_type const> : mpl::true_ {} ;
 
 template <>
-struct container_iterator<mapnik::geometry_type const>
+struct is_container<mapnik::vertex_adapter const> : mpl::true_ {} ;
+
+// make gcc and darwin toolsets happy.
+// FIXME
+//template <>
+//struct is_container<mapnik::geometry_container const> : mpl::false_ {} ;
+
+//
+template <>
+struct container_iterator<mapnik::path_type const>
 {
-    typedef mapnik::util::vertex_iterator<double> type;
+    using type = mapnik::util::path_iterator<mapnik::path_type>;
 };
 
 template <>
-struct begin_container<mapnik::geometry_type const>
+struct container_iterator<mapnik::vertex_adapter const>
 {
-    static mapnik::util::vertex_iterator<double>
-    call (mapnik::geometry_type const& g)
+    using type = mapnik::util::path_iterator<mapnik::vertex_adapter>;
+};
+
+template <>
+struct begin_container<mapnik::path_type const>
+{
+    static mapnik::util::path_iterator<mapnik::path_type>
+    call (mapnik::path_type const& p)
     {
-        return mapnik::util::vertex_iterator<double>(g.data());
+        return mapnik::util::path_iterator<mapnik::path_type>(p);
     }
 };
 
 template <>
-struct end_container<mapnik::geometry_type const>
+struct begin_container<mapnik::vertex_adapter const>
 {
-    static mapnik::util::vertex_iterator<double>
-    call (mapnik::geometry_type const& g)
+    static mapnik::util::path_iterator<mapnik::vertex_adapter>
+    call (mapnik::vertex_adapter const& p)
     {
-        return mapnik::util::vertex_iterator<double>();
+        return mapnik::util::path_iterator<mapnik::vertex_adapter>(p);
+    }
+};
+
+template <>
+struct end_container<mapnik::path_type const>
+{
+    static mapnik::util::path_iterator<mapnik::path_type>
+    call (mapnik::path_type const&)
+    {
+        return mapnik::util::path_iterator<mapnik::path_type>();
+    }
+};
+
+template <>
+struct end_container<mapnik::vertex_adapter const>
+{
+    static mapnik::util::path_iterator<mapnik::vertex_adapter>
+    call (mapnik::vertex_adapter const&)
+    {
+        return mapnik::util::path_iterator<mapnik::vertex_adapter>();
     }
 };
 

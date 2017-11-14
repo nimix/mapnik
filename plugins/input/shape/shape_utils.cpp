@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,14 +23,13 @@
 // mapnik
 #include <mapnik/datasource.hpp>
 #include <mapnik/params.hpp>
+#include <mapnik/util/conversions.hpp>
 #include "shape_utils.hpp"
 
-// boost
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/algorithm/string.hpp>
-// stl
-#include <sstream>
-#include <iostream>
-
+#pragma GCC diagnostic pop
 
 void setup_attributes(mapnik::context_ptr const& ctx,
                       std::set<std::string> const& names,
@@ -56,19 +55,17 @@ void setup_attributes(mapnik::context_ptr const& ctx,
 
         if (! found_name)
         {
-            std::ostringstream s;
-
-            s << "no attribute '" << *pos << "' in '"
-              << shape_name << "'. Valid attributes are: ";
-
+            std::string s("no attribute '");
+            std::string pos_string;
+            s += *pos + "' in '" + shape_name + "'. Valid attributes are: ";
             std::vector<std::string> list;
             for (int i = 0; i < shape.dbf().num_fields(); ++i)
             {
                 list.push_back(shape.dbf().descriptor(i).name_);
             }
-            s << boost::algorithm::join(list, ",") << ".";
+            s += boost::algorithm::join(list, ",") + ".";
 
-            throw mapnik::datasource_exception("Shape Plugin: " + s.str());
+            throw mapnik::datasource_exception("Shape Plugin: " + s);
         }
     }
 }

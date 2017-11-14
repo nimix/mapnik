@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,11 +23,18 @@
 #ifndef MAPNIK_IMAGE_SCALING_HPP
 #define MAPNIK_IMAGE_SCALING_HPP
 
-// stl
-#include <string>
-
-#include <boost/optional.hpp>
+// mapnik
 #include <mapnik/config.hpp>
+#include <mapnik/image.hpp>
+
+// stl
+#include <iosfwd>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/optional.hpp>
+#pragma GCC diagnostic pop
+
 
 namespace mapnik
 {
@@ -50,34 +57,35 @@ enum scaling_method_e
     SCALING_MITCHELL,
     SCALING_SINC,
     SCALING_LANCZOS,
-    SCALING_BLACKMAN,
-    SCALING_BILINEAR8
+    SCALING_BLACKMAN
 };
 
-boost::optional<scaling_method_e> scaling_method_from_string(std::string const& name);
-boost::optional<std::string> scaling_method_to_string(scaling_method_e scaling_method);
+MAPNIK_DECL boost::optional<scaling_method_e> scaling_method_from_string(std::string const& name);
+MAPNIK_DECL boost::optional<std::string> scaling_method_to_string(scaling_method_e scaling_method);
 
-template <typename Image>
-void scale_image_agg(Image & target,
-                      Image const& source,
-                      scaling_method_e scaling_method,
-                      double scale_factor,
-                      double x_off_f=0,
-                      double y_off_f=0,
-                      double filter_radius=2,
-                      double ratio=1);
-
-template <typename Image>
-void scale_image_bilinear_old(Image & target,
-                              Image const& source,
-                              double x_off_f=0,
-                              double y_off_f=0);
-
-template <typename Image>
-void scale_image_bilinear8(Image & target,
-                           Image const& source,
-                           double x_off_f=0,
-                           double y_off_f=0);
-
+template <typename T>
+MAPNIK_DECL void scale_image_agg(T & target, T const& source,
+                                 scaling_method_e scaling_method,
+                                 double image_ratio_x,
+                                 double image_ratio_y,
+                                 double x_off_f,
+                                 double y_off_f,
+                                 double filter_factor,
+                                 boost::optional<double> const & nodata_value);
+template <typename T>
+inline void scale_image_agg(T & target, T const& source,
+                                 scaling_method_e scaling_method,
+                                 double image_ratio_x,
+                                 double image_ratio_y,
+                                 double x_off_f,
+                                 double y_off_f,
+                                 double filter_factor)
+{
+    scale_image_agg(target, source, scaling_method,
+                    image_ratio_x,image_ratio_y,
+                    x_off_f, y_off_f, filter_factor,
+                    boost::optional<double>());
 }
+}
+
 #endif // MAPNIK_IMAGE_SCALING_HPP

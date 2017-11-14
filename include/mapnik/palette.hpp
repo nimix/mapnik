@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,44 +26,41 @@
 // mapnik
 #include <mapnik/config.hpp>
 #include <mapnik/global.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
-// boost
-#include <boost/utility.hpp>
-#include <boost/unordered_map.hpp>
+#define USE_DENSE_HASH_MAP
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#ifdef USE_DENSE_HASH_MAP
+#include <mapnik/sparsehash/dense_hash_map>
+using rgba_hash_table = google::dense_hash_map<unsigned int, unsigned char>;
+#else
+#include <unordered_map>
+using rgba_hash_table = std::unordered_map<unsigned int, unsigned char>;
+#endif
+#pragma GCC diagnostic pop
 
 // stl
 #include <vector>
-#include <map>
-#include <iostream>
-#include <set>
-#include <algorithm>
-#include <cmath>
+#include <tuple>
 
-
-#ifdef MAPNIK_BIG_ENDIAN
-#define U2RED(x) (((x)>>24)&0xff)
-#define U2GREEN(x) (((x)>>16)&0xff)
-#define U2BLUE(x) (((x)>>8)&0xff)
-#define U2ALPHA(x) ((x)&0xff)
-#else
 #define U2RED(x) ((x)&0xff)
 #define U2GREEN(x) (((x)>>8)&0xff)
 #define U2BLUE(x) (((x)>>16)&0xff)
 #define U2ALPHA(x) (((x)>>24)&0xff)
-#endif
-
 
 namespace mapnik {
 
-typedef boost::uint8_t byte;
 struct rgba;
 
-struct rgb {
-    byte r;
-    byte g;
-    byte b;
+struct MAPNIK_DECL rgb
+{
+    std::uint8_t r;
+    std::uint8_t g;
+    std::uint8_t b;
 
-    inline rgb(byte r_, byte g_, byte b_) : r(r_), g(g_), b(b_) {};
+    inline rgb(std::uint8_t r_, std::uint8_t g_, std::uint8_t b_) : r(r_), g(g_), b(b_) {}
     rgb(rgba const& c);
 
     inline bool operator==(const rgb& y) const
@@ -72,14 +69,14 @@ struct rgb {
     }
 };
 
-struct rgba
+struct MAPNIK_DECL rgba
 {
-    byte r;
-    byte g;
-    byte b;
-    byte a;
+    std::uint8_t r;
+    std::uint8_t g;
+    std::uint8_t b;
+    std::uint8_t a;
 
-    inline rgba(byte r_, byte g_, byte b_, byte a_)
+    inline rgba(std::uint8_t r_, std::uint8_t g_, std::uint8_t b_, std::uint8_t a_)
         : r(r_),
           g(g_),
           b(b_),
@@ -97,60 +94,43 @@ struct rgba
           b(U2BLUE(c)),
           a(U2ALPHA(c)) {}
 
-    inline bool operator==(const rgba& y) const
+    inline bool operator==(rgba const& y) const
     {
         return r == y.r && g == y.g && b == y.b && a == y.a;
     }
 
-    inline operator unsigned() const
-    {
-#ifdef MAPNIK_BIG_ENDIAN
-        return (r << 24) | (g << 16) | (b << 8) | a;
-#else
-        return r | (g << 8) | (b << 16) | (a << 24);
-#endif
-    }
-
     // ordering by mean(a,r,g,b), a, r, g, b
-    struct mean_sort_cmp
+    struct MAPNIK_DECL mean_sort_cmp
     {
         bool operator() (const rgba& x, const rgba& y) const;
     };
 
-    struct hash_func : public std::unary_function<rgba, std::size_t>
+    inline bool operator<(rgba const& y) const
     {
-        std::size_t operator()(rgba const& p) const;
-    };
+        return std::tie(r, g, b, a) < std::tie(y.r, y.g, y.b, y.a);
+    }
+
 };
 
 
-typedef boost::unordered_map<unsigned, unsigned> rgba_hash_table;
-
-
-class MAPNIK_DECL rgba_palette : private boost::noncopyable {
+class MAPNIK_DECL rgba_palette : private util::noncopyable
+{
 public:
     enum palette_type { PALETTE_RGBA = 0, PALETTE_RGB = 1, PALETTE_ACT = 2 };
 
     explicit rgba_palette(std::string const& pal, palette_type type = PALETTE_RGBA);
     rgba_palette();
 
-    const std::vector<rgb>& palette() const;
-    const std::vector<unsigned>& alphaTable() const;
+    inline std::vector<rgb> const& palette() const { return rgb_pal_;}
+    inline std::vector<unsigned> const& alpha_table() const { return alpha_pal_;}
 
-    unsigned quantize(rgba const& c) const;
-    inline unsigned quantize(unsigned const& c) const
-    {
-        rgba_hash_table::const_iterator it = color_hashmap_.find(c);
-        if (it != color_hashmap_.end())
-        {
-            return it->second;
-        }
-        else {
-            return quantize(rgba(U2RED(c), U2GREEN(c), U2BLUE(c), U2ALPHA(c)));
-        }
-    }
+    inline std::vector<rgb>& palette() { return rgb_pal_;}
+    inline std::vector<unsigned>& alpha_table() { return alpha_pal_;}
+
+    unsigned char quantize(unsigned c) const;
 
     bool valid() const;
+    std::string to_string() const;
 
 private:
     void parse(std::string const& pal, palette_type type);
@@ -167,4 +147,3 @@ private:
 } // namespace mapnik
 
 #endif // MAPNIK_PALETTE_HPP
-

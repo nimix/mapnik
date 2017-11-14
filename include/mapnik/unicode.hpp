@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,30 +25,37 @@
 
 //mapnik
 #include <mapnik/config.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/value/types.hpp>
 
-// icu
-#include <unicode/unistr.h>
-#include <unicode/ucnv.h>
-
-// boost
-#include <boost/utility.hpp>
-#include <boost/cstdint.hpp>
-
-// stl
+// std
+#include <cstdint>
 #include <string>
+// icu
+#if (U_ICU_VERSION_MAJOR_NUM >= 59)
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <unicode/unistr.h>
+#pragma GCC diagnostic pop
+#endif
+
+struct UConverter;
 
 namespace mapnik {
 
-class MAPNIK_DECL transcoder : private boost::noncopyable
+class MAPNIK_DECL transcoder : private util::noncopyable
 {
 public:
     explicit transcoder (std::string const& encoding);
-    UnicodeString transcode(const char* data, boost::int32_t length = -1) const;
+    mapnik::value_unicode_string transcode(const char* data, std::int32_t length = -1) const;
     ~transcoder();
 private:
-    bool ok_;
     UConverter * conv_;
 };
+
+// convinience method
+void MAPNIK_DECL to_utf8(mapnik::value_unicode_string const& input, std::string & target);
+
 }
 
 #endif // MAPNIK_UNICODE_HPP

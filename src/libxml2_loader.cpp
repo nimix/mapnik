@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,15 +23,12 @@
 #ifdef HAVE_LIBXML2
 
 // mapnik
-#include <mapnik/debug.hpp>
 #include <mapnik/xml_loader.hpp>
 #include <mapnik/xml_node.hpp>
 #include <mapnik/config_error.hpp>
-
-// boost
-#include <boost/utility.hpp>
-#include <boost/filesystem/operations.hpp>
-#include <boost/algorithm/string/trim.hpp>
+#include <mapnik/util/trim.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/util/fs.hpp>
 
 // libxml
 #include <libxml/parser.h>
@@ -40,18 +37,16 @@
 #include <libxml/xinclude.h>
 
 // stl
-#include <iostream>
-
-using namespace std;
+#include <stdexcept>
 
 #define DEFAULT_OPTIONS (XML_PARSE_NOERROR | XML_PARSE_NOENT | XML_PARSE_NOBLANKS | XML_PARSE_DTDLOAD | XML_PARSE_NOCDATA)
 
 namespace mapnik
 {
-class libxml2_loader : boost::noncopyable
+class libxml2_loader : util::noncopyable
 {
 public:
-    libxml2_loader(const char *encoding = NULL, int options = DEFAULT_OPTIONS, const char *url = NULL) :
+    libxml2_loader(const char *encoding = nullptr, int options = DEFAULT_OPTIONS, const char *url = nullptr) :
         ctx_(0),
         encoding_(encoding),
         options_(options),
@@ -75,10 +70,9 @@ public:
 
     void load(std::string const& filename, xml_node &node)
     {
-        boost::filesystem::path path(filename);
-        if (!boost::filesystem::exists(path))
+        if (!mapnik::util::exists(filename))
         {
-            throw config_error(string("Could not load map file: File does not exist"), 0, filename);
+            throw config_error(std::string("Could not load map file: File does not exist"), 0, filename);
         }
 
         xmlDocPtr doc = xmlCtxtReadFile(ctx_, filename.c_str(), encoding_, options_);
@@ -88,21 +82,13 @@ public:
             xmlError * error = xmlCtxtGetLastError(ctx_);
             if (error)
             {
-                std::ostringstream os;
-                os << "XML document not well formed";
-                os << ": " << std::endl << error->message;
+                std::string msg("XML document not well formed:\n");
+                msg += error->message;
                 // remove CR
-                std::string msg = os.str().substr(0, os.str().size() - 1);
+                msg = msg.substr(0, msg.size() - 1);
                 throw config_error(msg, error->line, error->file);
             }
         }
-
-        /*
-          if ( ! ctx->valid )
-          {
-            MAPNIK_LOG_WARN(libxml2_loader) << "libxml2_loader: Failed to validate DTD.";
-          }
-        */
         load(doc, node);
     }
 
@@ -116,13 +102,12 @@ public:
     {
         if (!base_path.empty())
         {
-            boost::filesystem::path path(base_path);
-            if (!boost::filesystem::exists(path)) {
-                throw config_error(string("Could not locate base_path '") +
+            if (!mapnik::util::exists(base_path)) {
+                throw config_error(std::string("Could not locate base_path '") +
                                    base_path + "': file or directory does not exist");
             }
         }
-
+        // NOTE: base_path here helps libxml2 resolve entities correctly: https://github.com/mapnik/mapnik/issues/440
         xmlDocPtr doc = xmlCtxtReadMemory(ctx_, buffer.data(), buffer.length(), base_path.c_str(), encoding_, options_);
 
         load(doc, node);
@@ -132,18 +117,18 @@ public:
     {
         if (!doc)
         {
+            std::string msg("XML document not well formed");
             xmlError * error = xmlCtxtGetLastError( ctx_ );
-            std::ostringstream os;
-            os << "XML document not well formed";
-            int line=0;
-            std::string file;
             if (error)
             {
-                os << ": " << std::endl << error->message;
-                line = error->line;
-                file = error->file;
+                msg += ":\n";
+                msg += error->message;
+                throw config_error(msg, error->line, error->file);
             }
-            throw config_error(os.str(), line, file);
+            else
+            {
+                throw config_error(msg);
+            }
         }
 
         int iXIncludeReturn = xmlXIncludeProcessFlags(doc, options_);
@@ -165,15 +150,16 @@ public:
     }
 
 private:
-    void append_attributes(xmlAttr *attributes, xml_node &node)
+    void inline append_attributes(xmlAttr *attributes, xml_node & node)
     {
         for (; attributes; attributes = attributes->next )
         {
-            node.add_attribute((const char *)attributes->name, (const char *)attributes->children->content);
+            node.add_attribute(reinterpret_cast<const char *>(attributes->name),
+                               reinterpret_cast<const char *>(attributes->children->content));
         }
     }
 
-    void populate_tree(xmlNode *cur_node, xml_node &node)
+    void inline populate_tree(xmlNode *cur_node, xml_node &node)
     {
         for (; cur_node; cur_node = cur_node->next )
         {
@@ -181,18 +167,17 @@ private:
             {
             case XML_ELEMENT_NODE:
             {
-
-                xml_node &new_node = node.add_child((const char *)cur_node->name, cur_node->line, false);
+                xml_node &new_node = node.add_child(reinterpret_cast<const char *>(cur_node->name), cur_node->line, false);
                 append_attributes(cur_node->properties, new_node);
                 populate_tree(cur_node->children, new_node);
             }
             break;
             case XML_TEXT_NODE:
             {
-                std::string trimmed((const char*)cur_node->content);
-                boost::algorithm::trim(trimmed);
+                std::string trimmed(reinterpret_cast<const char *>(cur_node->content));
+                mapnik::util::trim(trimmed);
                 if (trimmed.empty()) break; //Don't add empty text nodes
-                node.add_child(trimmed, cur_node->line, true);
+                node.add_child(trimmed.c_str(), cur_node->line, true);
             }
             break;
             case XML_COMMENT_NODE:

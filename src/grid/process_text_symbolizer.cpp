@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,9 +20,16 @@
  *
  *****************************************************************************/
 
+#if defined(GRID_RENDERER)
+
 // mapnik
+#include <mapnik/feature.hpp>
 #include <mapnik/grid/grid_renderer.hpp>
-#include <mapnik/symbolizer_helpers.hpp>
+#include <mapnik/text/symbolizer_helpers.hpp>
+#include <mapnik/pixel_position.hpp>
+#include <mapnik/text/renderer.hpp>
+#include <mapnik/text/glyph_positions.hpp>
+#include <mapnik/renderer_common/clipping_extent.hpp>
 
 namespace mapnik {
 
@@ -31,32 +38,44 @@ void grid_renderer<T>::process(text_symbolizer const& sym,
                                mapnik::feature_impl & feature,
                                proj_transform const& prj_trans)
 {
-    text_symbolizer_helper<face_manager<freetype_engine>,
-        label_collision_detector4> helper(
-            sym, feature, prj_trans,
-            width_, height_,
-            scale_factor_ * (1.0/pixmap_.get_resolution()),
-            t_, font_manager_, detector_,
-            query_extent_);
+    box2d<double> clip_box = clipping_extent(common_);
+    agg::trans_affine tr;
+    auto transform = get_optional<transform_type>(sym, keys::geometry_transform);
+    if (transform) evaluate_transform(tr, feature, common_.vars_, *transform, common_.scale_factor_);
+    text_symbolizer_helper helper(
+        sym, feature, common_.vars_, prj_trans,
+        common_.width_, common_.height_,
+        common_.scale_factor_,
+        common_.t_, common_.font_manager_, *common_.detector_,
+        clip_box, tr);
     bool placement_found = false;
 
-    text_renderer<T> ren(pixmap_,
-                         font_manager_,
-                         *(font_manager_.get_stroker()),
-                         sym.comp_op(),
-                         scale_factor_);
+    composite_mode_e comp_op = get<composite_mode_e>(sym, keys::comp_op, feature, common_.vars_, src_over);
 
-    while (helper.next()) {
-        placement_found = true;
-        placements_type const& placements = helper.placements();
-        for (unsigned int ii = 0; ii < placements.size(); ++ii)
-        {
-            ren.prepare_glyphs(placements[ii]);
-            ren.render_id(feature.id(), placements[ii].center, 2);
-        }
+    grid_text_renderer<T> ren(pixmap_,
+                              comp_op,
+                              common_.scale_factor_);
+
+    auto halo_transform = get_optional<transform_type>(sym, keys::halo_transform);
+    if (halo_transform)
+    {
+        agg::trans_affine halo_affine_transform;
+        evaluate_transform(halo_affine_transform, feature, common_.vars_, *halo_transform, common_.scale_factor_);
+        ren.set_halo_transform(halo_affine_transform);
     }
-    if (placement_found) pixmap_.add_feature(feature);
 
+    placements_list const& placements = helper.get();
+    value_integer feature_id = feature.id();
+
+    for (auto const& glyphs : placements)
+    {
+        ren.render(*glyphs, feature_id);
+        placement_found = true;
+    }
+    if (placement_found)
+    {
+        pixmap_.add_feature(feature);
+    }
 }
 
 template void grid_renderer<grid>::process(text_symbolizer const&,
@@ -65,3 +84,4 @@ template void grid_renderer<grid>::process(text_symbolizer const&,
 
 }
 
+#endif

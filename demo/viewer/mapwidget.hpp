@@ -1,6 +1,6 @@
 /* This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * Mapnik is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,10 +14,9 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-//$Id$
 
 #ifndef MAP_WIDGET_HPP
 #define MAP_WIDGET_HPP
@@ -29,8 +28,8 @@
 #include <QItemSelection>
 #include <iostream>
 #include <string>
-#include <boost/shared_ptr.hpp>
-#include <boost/scoped_ptr.hpp>
+#include <memory>
+
 
 #ifndef Q_MOC_RUN
 #include <mapnik/map.hpp>
@@ -56,7 +55,7 @@ public:
     };
 
 private:
-    boost::shared_ptr<mapnik::Map> map_;
+    std::shared_ptr<mapnik::Map> map_;
     int selected_;
     QPixmap pix_;
     mapnik::box2d<double> extent_;
@@ -74,9 +73,9 @@ private:
 public:
     MapWidget(QWidget *parent=0);
     void setTool(eTool tool);
-    boost::shared_ptr<mapnik::Map> getMap();
+    std::shared_ptr<mapnik::Map> getMap();
     inline QPixmap const& pixmap() const { return pix_;}
-    void setMap(boost::shared_ptr<mapnik::Map> map);
+    void setMap(std::shared_ptr<mapnik::Map> map);
     void defaultView();
     void zoomToBox(mapnik::box2d<double> const& box);
     void zoomIn();

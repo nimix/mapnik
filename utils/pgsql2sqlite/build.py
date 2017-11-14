@@ -1,7 +1,7 @@
 #
 # This file is part of Mapnik (c++ mapping toolkit)
 #
-# Copyright (C) 2009 Artem Pavlenko, Dane Springmeyer
+# Copyright (C) 2015 Artem Pavlenko
 #
 # Mapnik is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -17,7 +17,8 @@
 # License along with this library; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# $Id$
+#
+
 
 import os
 from copy import copy
@@ -36,16 +37,31 @@ source = Split(
     )
 
 program_env['CXXFLAGS'] = copy(env['LIBMAPNIK_CXXFLAGS'])
+program_env['LINKFLAGS'] = copy(env['LIBMAPNIK_LINKFLAGS'])
+program_env.Append(CPPDEFINES = env['LIBMAPNIK_DEFINES'])
+program_env['LIBS'] = []
+
+if env['RUNTIME_LINK'] == 'static':
+    # pkg-config is more reliable than pg_config across platforms
+    cmd = 'pkg-config libpq --libs --static'
+    try:
+        program_env.ParseConfig(cmd)
+    except OSError, e:
+        program_env.Append(LIBS='pq')
+else:
+    program_env.Append(LIBS='pq')
+
+# Link Library to Dependencies
+libraries = copy(program_env['LIBS'])
 
 if env['HAS_CAIRO']:
-    program_env.PrependUnique(CPPPATH=env['CAIROMM_CPPPATHS'])
-    program_env.Append(CXXFLAGS = '-DHAVE_CAIRO')
+    program_env.PrependUnique(CPPPATH=env['CAIRO_CPPPATHS'])
+    program_env.Append(CPPDEFINES = '-DHAVE_CAIRO')
 
 program_env.PrependUnique(CPPPATH=['#plugins/input/postgis'])
 
-libraries = []
 boost_program_options = 'boost_program_options%s' % env['BOOST_APPEND']
-libraries.extend([boost_program_options,'sqlite3','pq','mapnik','icuuc'])
+libraries.extend([boost_program_options,'sqlite3',env['MAPNIK_NAME'],'icuuc'])
 
 if env.get('BOOST_LIB_VERSION_FROM_HEADER'):
     boost_version_from_header = int(env['BOOST_LIB_VERSION_FROM_HEADER'].split('_')[1])
@@ -53,14 +69,13 @@ if env.get('BOOST_LIB_VERSION_FROM_HEADER'):
         boost_system = 'boost_system%s' % env['BOOST_APPEND']
         libraries.extend([boost_system])
 
-linkflags = env['CUSTOM_LDFLAGS']
 if env['SQLITE_LINKFLAGS']:
-    linkflags.append(env['SQLITE_LINKFLAGS'])
+    program_env.Append(LINKFLAGS=env['SQLITE_LINKFLAGS'])
 
-if env['RUNTIME_LINK'] == 'static':
-    libraries.extend(['ldap','pam','ssl','crypto','krb5'])
+if env['RUNTIME_LINK'] == 'static' and env['PLATFORM'] == 'Linux':
+    libraries.append('dl')
 
-pgsql2sqlite = program_env.Program('pgsql2sqlite', source, LIBS=libraries, LINKFLAGS=linkflags)
+pgsql2sqlite = program_env.Program('pgsql2sqlite', source, LIBS=libraries)
 Depends(pgsql2sqlite, env.subst('../../src/%s' % env['MAPNIK_LIB_NAME']))
 
 if 'uninstall' not in COMMAND_LINE_TARGETS:

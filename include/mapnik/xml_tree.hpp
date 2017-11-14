@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,48 +20,34 @@
  *
  *****************************************************************************/
 
-#ifndef MAPNIK_XML_TREE_H
-#define MAPNIK_XML_TREE_H
-//mapnik
+#ifndef MAPNIK_XML_TREE_HPP
+#define MAPNIK_XML_TREE_HPP
+
+// mapnik
 #include <mapnik/xml_node.hpp>
-#include <mapnik/expression_grammar.hpp>
-#include <mapnik/path_expression_grammar.hpp>
-#include <mapnik/transform_expression_grammar.hpp>
-
-// boost
-#include <boost/format.hpp>
-
-#if BOOST_VERSION >= 104500
-#include <mapnik/css_color_grammar.hpp>
-#else
-#include <mapnik/css_color_grammar_deprecated.hpp>
-#endif
+#include <mapnik/expression.hpp>
 
 //stl
 #include <string>
 
-
 namespace mapnik
 {
-class xml_tree
+
+class MAPNIK_DECL xml_tree
 {
 public:
-    xml_tree(std::string const& encoding="utf8");
-    void set_filename(std::string fn);
+    xml_tree();
+    void set_filename(std::string const& fn);
     std::string const& filename() const;
     xml_node &root();
     xml_node const& root() const;
 private:
     xml_node node_;
     std::string file_;
-    transcoder tr_;
 public:
-    mapnik::css_color_grammar<std::string::const_iterator> color_grammar;
-    mapnik::expression_grammar<std::string::const_iterator> expr_grammar;
-    path_expression_grammar<std::string::const_iterator> path_expr_grammar;
-    transform_expression_grammar<std::string::const_iterator> transform_expr_grammar;
+    mutable std::map<std::string,mapnik::expression_ptr> expr_cache_;
 };
 
 } //ns mapnik
 
-#endif // MAPNIK_XML_TREE_H
+#endif // MAPNIK_XML_TREE_HPP

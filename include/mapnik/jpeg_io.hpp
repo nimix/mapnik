@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,19 +25,18 @@
 
 #if defined(HAVE_JPEG)
 
-#include <mapnik/global.hpp>
-
+#include <new>
 #include <ostream>
+#include <cstdio>
 
 extern "C"
 {
-#include <stdio.h>
 #include <jpeglib.h>
 }
 
-namespace mapnik {
-
 #define BUFFER_SIZE 4096
+
+namespace jpeg_detail {
 
 typedef struct
 {
@@ -59,10 +58,10 @@ inline boolean empty_output_buffer (j_compress_ptr cinfo)
 {
     dest_mgr * dest = reinterpret_cast<dest_mgr*>(cinfo->dest);
     dest->out->write((char*)dest->buffer, BUFFER_SIZE);
-    if (!*(dest->out)) return false;
+    if (!*(dest->out)) return boolean(0);
     dest->pub.next_output_byte = dest->buffer;
     dest->pub.free_in_buffer = BUFFER_SIZE;
-    return true;
+    return boolean(1);
 }
 
 inline void term_destination( j_compress_ptr cinfo)
@@ -76,24 +75,28 @@ inline void term_destination( j_compress_ptr cinfo)
     dest->out->flush();
 }
 
+}
+
+namespace mapnik {
+
 template <typename T1, typename T2>
 void save_as_jpeg(T1 & file,int quality, T2 const& image)
 {
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
 
-    int width=image.width();
-    int height=image.height();
+    int width = static_cast<int>(image.width());
+    int height = static_cast<int>(image.height());
 
     cinfo.err = jpeg_std_error(&jerr);
     jpeg_create_compress(&cinfo);
 
     cinfo.dest = (struct jpeg_destination_mgr *)(*cinfo.mem->alloc_small)
-        ((j_common_ptr) &cinfo, JPOOL_PERMANENT, sizeof(dest_mgr));
-    dest_mgr * dest = (dest_mgr*) cinfo.dest;
-    dest->pub.init_destination = init_destination;
-    dest->pub.empty_output_buffer = empty_output_buffer;
-    dest->pub.term_destination = term_destination;
+        ((j_common_ptr) &cinfo, JPOOL_PERMANENT, sizeof(jpeg_detail::dest_mgr));
+    jpeg_detail::dest_mgr * dest = reinterpret_cast<jpeg_detail::dest_mgr*>(cinfo.dest);
+    dest->pub.init_destination = jpeg_detail::init_destination;
+    dest->pub.empty_output_buffer = jpeg_detail::empty_output_buffer;
+    dest->pub.term_destination = jpeg_detail::term_destination;
     dest->out = &file;
 
     //jpeg_stdio_dest(&cinfo, fp);
@@ -102,25 +105,19 @@ void save_as_jpeg(T1 & file,int quality, T2 const& image)
     cinfo.input_components = 3;
     cinfo.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality,1);
-    jpeg_start_compress(&cinfo, 1);
+    jpeg_set_quality(&cinfo, quality, boolean(1));
+    jpeg_start_compress(&cinfo, boolean(1));
     JSAMPROW row_pointer[1];
     JSAMPLE* row=reinterpret_cast<JSAMPLE*>( ::operator new (sizeof(JSAMPLE) * width*3));
     while (cinfo.next_scanline < cinfo.image_height)
     {
-        const unsigned* imageRow=image.getRow(cinfo.next_scanline);
+        const unsigned* imageRow=image.get_row(cinfo.next_scanline);
         int index=0;
         for (int i=0;i<width;++i)
         {
-#ifdef MAPNIK_BIG_ENDIAN
-            row[index++]=(imageRow[i]>>24)&0xff;
-            row[index++]=(imageRow[i]>>16)&0xff;
-            row[index++]=(imageRow[i]>>8)&0xff;
-#else
             row[index++]=(imageRow[i])&0xff;
             row[index++]=(imageRow[i]>>8)&0xff;
             row[index++]=(imageRow[i]>>16)&0xff;
-#endif
         }
         row_pointer[0] = &row[0];
         (void) jpeg_write_scanlines(&cinfo, row_pointer, 1);
@@ -135,4 +132,3 @@ void save_as_jpeg(T1 & file,int quality, T2 const& image)
 #endif
 
 #endif // MAPNIK_JPEG_IO_HPP
-

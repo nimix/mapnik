@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,45 +24,55 @@
 #define GDAL_FEATURESET_HPP
 
 // mapnik
-#include <mapnik/feature.hpp>
-#include <mapnik/datasource.hpp>
-
+#include <mapnik/featureset.hpp>
+#include <mapnik/query.hpp>
+#include <mapnik/util/variant.hpp>
 // boost
-#include <boost/variant.hpp>
 #include <boost/optional.hpp>
-
-#include "gdal_datasource.hpp"
 
 class GDALDataset;
 class GDALRasterBand;
 
-typedef boost::variant<mapnik::query, mapnik::coord2d> gdal_query;
+using gdal_query = mapnik::util::variant<mapnik::query, mapnik::coord2d>;
 
 class gdal_featureset : public mapnik::Featureset
 {
+    struct query_dispatch
+    {
+        query_dispatch( gdal_featureset & featureset)
+            : featureset_(featureset) {}
+
+        mapnik::feature_ptr operator() (mapnik::query const& q) const
+        {
+            return featureset_.get_feature(q);
+        }
+
+        mapnik::feature_ptr operator() (mapnik::coord2d const& p) const
+        {
+            return featureset_.get_feature_at_point(p);
+        }
+
+        gdal_featureset & featureset_;
+    };
+
 public:
     gdal_featureset(GDALDataset& dataset,
                     int band,
                     gdal_query q,
                     mapnik::box2d<double> extent,
-                    double width,
-                    double height,
+                    unsigned width,
+                    unsigned height,
                     int nbands,
                     double dx,
                     double dy,
-                    double filter_factor,
-                    boost::optional<double> const& nodata);
+                    boost::optional<double> const& nodata,
+                    double nodata_tolerance);
     virtual ~gdal_featureset();
     mapnik::feature_ptr next();
 
 private:
     mapnik::feature_ptr get_feature(mapnik::query const& q);
     mapnik::feature_ptr get_feature_at_point(mapnik::coord2d const& p);
-
-#ifdef MAPNIK_LOG
-    void get_overview_meta(GDALRasterBand * band);
-#endif
-
     GDALDataset & dataset_;
     mapnik::context_ptr ctx_;
     int band_;
@@ -73,8 +83,8 @@ private:
     double dx_;
     double dy_;
     int nbands_;
-    double filter_factor_;
     boost::optional<double> nodata_value_;
+    double nodata_tolerance_;
     bool first_;
 };
 

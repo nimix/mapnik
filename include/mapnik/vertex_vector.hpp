@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,22 +29,20 @@
 
 // mapnik
 #include <mapnik/vertex.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
-// boost
-#include <boost/utility.hpp>
-#include <boost/tuple/tuple.hpp>
-
-#include <cstring>  // required for memcpy with linux/g++
+// stl
+#include <algorithm>
+#include <tuple>
+#include <cstdint>
 
 namespace mapnik
 {
 
 template <typename T>
-class vertex_vector : private boost::noncopyable
+class vertex_vector : private util::noncopyable
 {
-    typedef T coord_type;
-    typedef vertex<coord_type,2> vertex_type;
-
+    using coordinate_type = T;
     enum block_e {
         block_shift = 8,
         block_size  = 1<<block_shift,
@@ -53,14 +51,14 @@ class vertex_vector : private boost::noncopyable
     };
 public:
     // required for iterators support
-    typedef boost::tuple<unsigned,coord_type,coord_type> value_type;
-    typedef std::size_t size_type;
-
+    using value_type = std::tuple<unsigned,coordinate_type,coordinate_type>;
+    using size_type = std::size_t;
+    using command_size = std::uint8_t;
 private:
     unsigned num_blocks_;
     unsigned max_blocks_;
-    coord_type** vertices_;
-    unsigned char** commands_;
+    coordinate_type** vertices_;
+    command_size** commands_;
     size_type pos_;
 
 public:
@@ -76,7 +74,7 @@ public:
     {
         if ( num_blocks_ )
         {
-            coord_type** vertices=vertices_ + num_blocks_ - 1;
+            coordinate_type** vertices=vertices_ + num_blocks_ - 1;
             while ( num_blocks_-- )
             {
                 ::operator delete(*vertices);
@@ -90,53 +88,61 @@ public:
         return pos_;
     }
 
-    void push_back (coord_type x,coord_type y,unsigned command)
+    void push_back (coordinate_type x,coordinate_type y,command_size command)
     {
-        unsigned block = pos_ >> block_shift;
+        size_type block = pos_ >> block_shift;
         if (block >= num_blocks_)
         {
             allocate_block(block);
         }
-        coord_type* vertex = vertices_[block] + ((pos_ & block_mask) << 1);
-        unsigned char* cmd= commands_[block] + (pos_ & block_mask);
+        coordinate_type* vertex = vertices_[block] + ((pos_ & block_mask) << 1);
+        command_size* cmd= commands_[block] + (pos_ & block_mask);
 
-        *cmd = static_cast<unsigned char>(command);
+        *cmd = static_cast<command_size>(command);
         *vertex++ = x;
         *vertex   = y;
         ++pos_;
     }
-    unsigned get_vertex(unsigned pos,coord_type* x,coord_type* y) const
+    unsigned get_vertex(unsigned pos,coordinate_type* x,coordinate_type* y) const
     {
         if (pos >= pos_) return SEG_END;
-        unsigned block = pos >> block_shift;
-        const coord_type* vertex = vertices_[block] + (( pos & block_mask) << 1);
+        size_type block = pos >> block_shift;
+        const coordinate_type* vertex = vertices_[block] + (( pos & block_mask) << 1);
         *x = (*vertex++);
         *y = (*vertex);
         return commands_[block] [pos & block_mask];
     }
 
+    void set_command(unsigned pos, unsigned command)
+    {
+        if (pos < pos_)
+        {
+            size_type block = pos >> block_shift;
+            commands_[block] [pos & block_mask] = command;
+        }
+    }
 private:
-    void allocate_block(unsigned block)
+    void allocate_block(size_type block)
     {
         if (block >= max_blocks_)
         {
-            coord_type** new_vertices =
-                static_cast<coord_type**>(::operator new (sizeof(coord_type*)*((max_blocks_ + grow_by) * 2)));
-            unsigned char** new_commands = (unsigned char**)(new_vertices + max_blocks_ + grow_by);
+            coordinate_type** new_vertices =
+                static_cast<coordinate_type**>(::operator new (sizeof(coordinate_type*)*((max_blocks_ + grow_by) * 2)));
+            command_size** new_commands = (command_size**)(new_vertices + max_blocks_ + grow_by);
             if (vertices_)
             {
-                std::memcpy(new_vertices,vertices_,max_blocks_ * sizeof(coord_type*));
-                std::memcpy(new_commands,commands_,max_blocks_ * sizeof(unsigned char*));
+                std::copy(vertices_, vertices_ + max_blocks_, new_vertices);
+                std::copy(commands_, commands_ + max_blocks_, new_commands);
                 ::operator delete(vertices_);
             }
             vertices_ = new_vertices;
             commands_ = new_commands;
             max_blocks_ += grow_by;
         }
-        vertices_[block] = static_cast<coord_type*>
-            (::operator new(sizeof(coord_type)*(block_size * 2 + block_size / (sizeof(coord_type)))));
+        vertices_[block] = static_cast<coordinate_type*>
+            (::operator new(sizeof(coordinate_type)*(block_size * 2 + block_size / (sizeof(coordinate_type)))));
 
-        commands_[block] = (unsigned char*)(vertices_[block] + block_size*2);
+        commands_[block] = (command_size*)(vertices_[block] + block_size*2);
         ++num_blocks_;
     }
 };

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,40 +24,48 @@
 #define MAPNIK_DATASOURCE_CACHE_HPP
 
 // mapnik
-#include <mapnik/utils.hpp>
-#include <mapnik/params.hpp>
-#include <mapnik/plugin.hpp>
-#include <mapnik/datasource.hpp>
-
-// boost
-#include <boost/utility.hpp>
-#include <boost/shared_ptr.hpp>
+#include <mapnik/config.hpp>
+#include <mapnik/util/singleton.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
 // stl
 #include <map>
+#include <set>
+#include <vector>
+#include <memory>
+#include <mutex>
 
 namespace mapnik {
-class MAPNIK_DECL datasource_cache :
-        public singleton <datasource_cache,CreateStatic>,
-        private boost::noncopyable
+
+class datasource;
+class parameters;
+class PluginInfo;
+
+class MAPNIK_DECL datasource_cache
+    : public singleton<datasource_cache, CreateStatic>,
+      private util::noncopyable
 {
     friend class CreateStatic<datasource_cache>;
+public:
+    std::vector<std::string> plugin_names();
+    std::string plugin_directories();
+    bool register_datasources(std::string const& path, bool recurse = false);
+    bool register_datasource(std::string const& path);
+    std::shared_ptr<datasource> create(parameters const& params);
 private:
     datasource_cache();
     ~datasource_cache();
-    datasource_cache(const datasource_cache&);
-    datasource_cache& operator=(const datasource_cache&);
-    static std::map<std::string,boost::shared_ptr<PluginInfo> > plugins_;
-    static bool registered_;
-    static bool insert(const std::string&  name,const lt_dlhandle module);
-    static std::vector<std::string> plugin_directories_;
-public:
-    static std::vector<std::string> plugin_names();
-    static std::string plugin_directories();
-    static void register_datasources(std::string const& path);
-    static bool register_datasource(std::string const& path);
-    static boost::shared_ptr<datasource> create(parameters const& params, bool bind=true);
+    std::map<std::string,std::shared_ptr<PluginInfo> > plugins_;
+    std::set<std::string> plugin_directories_;
+    // the singleton has a mutex protecting the instance pointer,
+    // but the instance also needs its own mutex to protect the
+    // plugins_ and plugin_directories_ members which are potentially
+    // modified recusrively by register_datasources(path, true);
+    std::recursive_mutex instance_mutex_;
 };
+
+extern template class MAPNIK_DECL singleton<datasource_cache, CreateStatic>;
+
 }
 
 #endif // MAPNIK_DATASOURCE_CACHE_HPP

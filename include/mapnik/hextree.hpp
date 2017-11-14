@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,21 +26,12 @@
 // mapnik
 #include <mapnik/global.hpp>
 #include <mapnik/palette.hpp>
-
-// boost
-#include <boost/utility.hpp>
-#include <boost/version.hpp>
-#include <boost/unordered_map.hpp>
-#if BOOST_VERSION >= 104600
-#include <boost/range/algorithm.hpp>
-#endif
-#include <boost/scoped_ptr.hpp>
+#include <mapnik/util/noncopyable.hpp>
 
 // stl
-#include <vector>
-#include <iostream>
-#include <set>
 #include <algorithm>
+#include <vector>
+#include <set>
 #include <cmath>
 
 namespace mapnik {
@@ -61,20 +52,21 @@ struct RGBAPolicy
 };
 
 template <typename T, typename InsertPolicy = RGBAPolicy >
-class hextree : private boost::noncopyable
+class hextree : private util::noncopyable
 {
     struct node
     {
         node ()
-            : reds(0),
-              greens(0),
-              blues(0),
-              alphas(0),
+            : reds(0.0),
+              greens(0.0),
+              blues(0.0),
+              alphas(0.0),
               count(0),
               pixel_count(0),
+              reduce_cost(0.0),
               children_count(0)
         {
-            memset(&children_[0],0,sizeof(children_));
+            std::fill(children_, children_ + 16, nullptr);
         }
 
         ~node ()
@@ -106,7 +98,7 @@ class hextree : private boost::noncopyable
         // penalty of using this node as color
         double reduce_cost;
         // number of !=0 positions in children_ array
-        byte children_count;
+        std::uint8_t children_count;
     };
 
     // highest reduce_cost first
@@ -126,13 +118,12 @@ class hextree : private boost::noncopyable
     unsigned colors_;
     // flag indicating existance of invisible pixels (a < InsertPolicy::MIN_ALPHA)
     bool has_holes_;
-    boost::scoped_ptr<node> root_;
+    const std::unique_ptr<node> root_;
     // working palette for quantization, sorted on mean(r,g,b,a) for easier searching NN
     std::vector<rgba> sorted_pal_;
     // index remaping of sorted_pal_ indexes to indexes of returned image palette
     std::vector<unsigned> pal_remap_;
     // rgba hashtable for quantization
-    typedef boost::unordered_map<rgba, int, rgba::hash_func> rgba_hash_table;
     mutable rgba_hash_table color_hashmap_;
     // gamma correction to prioritize dark colors (>1.0)
     double gamma_;
@@ -153,9 +144,16 @@ public:
           colors_(0),
           has_holes_(false),
           root_(new node()),
+#ifdef USE_DENSE_HASH_MAP
+          // TODO - test for any benefit to initializing at a larger size
+          color_hashmap_(),
+#endif
           trans_mode_(FULL_TRANSPARENCY)
     {
         setGamma(g);
+#ifdef USE_DENSE_HASH_MAP
+        color_hashmap_.set_empty_key(0);
+#endif
     }
 
     ~hextree()
@@ -186,7 +184,7 @@ public:
     }
 
     // process alpha value based on trans_mode_
-    byte preprocessAlpha(byte a) const
+    std::uint8_t preprocessAlpha(std::uint8_t a) const
     {
         switch(trans_mode_)
         {
@@ -201,7 +199,7 @@ public:
 
     void insert(T const& data)
     {
-        byte a = preprocessAlpha(data.a);
+        std::uint8_t a = preprocessAlpha(data.a);
         unsigned level = 0;
         node * cur_node = root_.get();
         if (a < InsertPolicy::MIN_ALPHA)
@@ -238,9 +236,9 @@ public:
     }
 
     // return color index in returned earlier palette
-    int quantize(rgba const& c) const
+    int quantize(unsigned val) const
     {
-        byte a = preprocessAlpha(c.a);
+        std::uint8_t a = preprocessAlpha(U2ALPHA(val));
         unsigned ind=0;
         if (a < InsertPolicy::MIN_ALPHA || colors_ == 0)
         {
@@ -251,20 +249,16 @@ public:
             return pal_remap_[has_holes_?1:0];
         }
 
-        rgba_hash_table::iterator it = color_hashmap_.find(c);
+        rgba_hash_table::iterator it = color_hashmap_.find(val);
         if (it == color_hashmap_.end())
         {
+            rgba c(val);
             int dr, dg, db, da;
             int dist, newdist;
 
             // find closest match based on mean of r,g,b,a
-#if BOOST_VERSION >= 104600
-            std::vector<rgba>::const_iterator pit =
-                boost::lower_bound(sorted_pal_, c, rgba::mean_sort_cmp());
-#else
             std::vector<rgba>::const_iterator pit =
                 std::lower_bound(sorted_pal_.begin(),sorted_pal_.end(), c, rgba::mean_sort_cmp());
-#endif
             ind = pit-sorted_pal_.begin();
             if (ind == sorted_pal_.size())
                 ind--;
@@ -313,7 +307,7 @@ public:
                 }
             }
             //put found index in hash map
-            color_hashmap_[c] = ind;
+            color_hashmap_[val] = ind;
         }
         else
         {
@@ -337,28 +331,24 @@ public:
         create_palette_rek(sorted_pal_, root_.get());
 
         // sort palette for binary searching in quantization
-#if BOOST_VERSION >= 104600
-        boost::sort(sorted_pal_, rgba::mean_sort_cmp());
-#else
         std::sort(sorted_pal_.begin(), sorted_pal_.end(), rgba::mean_sort_cmp());
-#endif
         // returned palette is rearanged, so that colors with a<255 are at the begining
         pal_remap_.resize(sorted_pal_.size());
         palette.clear();
         palette.reserve(sorted_pal_.size());
-        for (unsigned i=0; i<sorted_pal_.size(); i++)
+        for (unsigned i=0; i<sorted_pal_.size(); ++i)
         {
             if (sorted_pal_[i].a<255)
             {
-                pal_remap_[i] = palette.size();
+                pal_remap_[i] = static_cast<unsigned>(palette.size());
                 palette.push_back(sorted_pal_[i]);
             }
         }
-        for (unsigned i=0; i<sorted_pal_.size(); i++)
+        for (unsigned i=0; i<sorted_pal_.size(); ++i)
         {
             if (sorted_pal_[i].a==255)
             {
-                pal_remap_[i] = palette.size();
+                pal_remap_[i] = static_cast<unsigned>(palette.size());
                 palette.push_back(sorted_pal_[i]);
             }
         }
@@ -375,20 +365,20 @@ private:
         if (r->count>0)
         {
             printf("%d: (+%d/%d/%.5f) (%d %d %d %d)\n",
-                   id, (int)r->count, (int)r->pixel_count, r->reduce_cost,
-                   (int)round(gamma(r->reds / r->count, gamma_)),
-                   (int)round(gamma(r->greens / r->count, gamma_)),
-                   (int)round(gamma(r->blues / r->count, gamma_)),
-                   (int)(r->alphas / r->count));
+                   id, static_cast<int>(r->count), static_cast<int>(r->pixel_count), r->reduce_cost,
+                   static_cast<int>(round(gamma(r->reds / r->count, gamma_))),
+                   static_cast<int>(round(gamma(r->greens / r->count, gamma_))),
+                   static_cast<int>(round(gamma(r->blues / r->count, gamma_))),
+                   static_cast<int>((r->alphas / r->count)));
         }
         else
         {
             printf("%d: (%d/%d/%.5f) (%d %d %d %d)\n", id,
-                   (int)r->count, (int)r->pixel_count, r->reduce_cost,
-                   (int)round(gamma(r->reds / r->pixel_count, gamma_)),
-                   (int)round(gamma(r->greens / r->pixel_count, gamma_)),
-                   (int)round(gamma(r->blues / r->pixel_count, gamma_)),
-                   (int)(r->alphas / r->pixel_count));
+                   static_cast<int>(r->count), static_cast<int>(r->pixel_count), r->reduce_cost,
+                   static_cast<int>(round(gamma(r->reds / r->pixel_count, gamma_))),
+                   static_cast<int>(round(gamma(r->greens / r->pixel_count, gamma_))),
+                   static_cast<int>(round(gamma(r->blues / r->pixel_count, gamma_))),
+                   static_cast<int>((r->alphas / r->pixel_count)));
         }
         for (unsigned idx=0; idx < 16; ++idx)
         {
@@ -403,15 +393,15 @@ private:
     // clip extreme alfa values
     void create_palette_rek(std::vector<rgba> & palette, node * itr) const
     {
-        if (itr->count >= 3)
+        if (itr->count != 0)
         {
             unsigned count = itr->count;
-            byte a = byte(itr->alphas/float(count));
+            std::uint8_t a = std::uint8_t(itr->alphas/float(count));
             if (a > InsertPolicy::MAX_ALPHA) a = 255;
             if (a < InsertPolicy::MIN_ALPHA) a = 0;
-            palette.push_back(rgba((byte)round(gamma(itr->reds   / count, gamma_)),
-                                   (byte)round(gamma(itr->greens / count, gamma_)),
-                                   (byte)round(gamma(itr->blues  / count, gamma_)), a));
+            palette.push_back(rgba(static_cast<std::uint8_t>(round(gamma(itr->reds   / count, gamma_))),
+                                   static_cast<std::uint8_t>(round(gamma(itr->greens / count, gamma_))),
+                                   static_cast<std::uint8_t>(round(gamma(itr->blues  / count, gamma_))), a));
         }
         for (unsigned idx=0; idx < 16; ++idx)
         {

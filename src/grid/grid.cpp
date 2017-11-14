@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,28 +20,34 @@
  *
  *****************************************************************************/
 
+#if defined(GRID_RENDERER)
+
 // mapnik
 #include <mapnik/grid/grid.hpp>
+#include <mapnik/debug.hpp>
+#include <mapnik/feature.hpp>
+#include <mapnik/value.hpp>
+
+// boost
 
 namespace mapnik
 {
 
 template <typename T>
-const typename hit_grid<T>::value_type hit_grid<T>::base_mask = std::numeric_limits<T>::min();
+const typename hit_grid<T>::value_type hit_grid<T>::base_mask = std::numeric_limits<typename T::type>::min();
 
 template <typename T>
-hit_grid<T>::hit_grid(int width, int height, std::string const& key, unsigned int resolution)
+hit_grid<T>::hit_grid(std::size_t width, std::size_t height, std::string const& key)
     : width_(width),
       height_(height),
       key_(key),
       data_(width,height),
-      resolution_(resolution),
       id_name_("__id__"),
       painted_(false),
       names_(),
       f_keys_(),
       features_(),
-      ctx_(boost::make_shared<mapnik::context_type>())
+      ctx_(std::make_shared<mapnik::context_type>())
       {
           f_keys_[base_mask] = "";
           data_.set(base_mask);
@@ -53,22 +59,33 @@ hit_grid<T>::hit_grid(hit_grid<T> const& rhs)
       height_(rhs.height_),
       key_(rhs.key_),
       data_(rhs.data_),
-      resolution_(rhs.resolution_),
       id_name_("__id__"),
       painted_(rhs.painted_),
       names_(rhs.names_),
       f_keys_(rhs.f_keys_),
       features_(rhs.features_),
       ctx_(rhs.ctx_)
-      {
-          f_keys_[base_mask] = "";
-          data_.set(base_mask);
-      }
+{
+    f_keys_[base_mask] = "";
+    data_.set(base_mask);
+}
 
 template <typename T>
-void hit_grid<T>::add_feature(mapnik::feature_impl & feature)
+void hit_grid<T>::clear()
 {
-    int feature_id = feature.id();
+    painted_ = false;
+    f_keys_.clear();
+    features_.clear();
+    names_.clear();
+    f_keys_[base_mask] = "";
+    data_.set(base_mask);
+    ctx_ = std::make_shared<mapnik::context_type>();
+}
+
+template <typename T>
+void hit_grid<T>::add_feature(mapnik::feature_impl const& feature)
+{
+    value_type feature_id = feature.id();
     // avoid adding duplicate features (e.g. in the case of both a line symbolizer and a polygon symbolizer)
     typename feature_key_type::const_iterator feature_pos = f_keys_.find(feature_id);
     if (feature_pos != f_keys_.end())
@@ -76,7 +93,8 @@ void hit_grid<T>::add_feature(mapnik::feature_impl & feature)
         return;
     }
 
-    if (ctx_->size() == 0) {
+    if (ctx_->size() == 0)
+    {
         context_type::map_type::const_iterator itr = feature.context()->begin();
         context_type::map_type::const_iterator end = feature.context()->end();
         for ( ;itr!=end; ++itr)
@@ -107,7 +125,7 @@ void hit_grid<T>::add_feature(mapnik::feature_impl & feature)
     {
         // TODO - consider shortcutting f_keys if feature_id == lookup_value
         // create a mapping between the pixel id and the feature key
-        f_keys_.insert(std::make_pair(feature_id,lookup_value));
+        f_keys_.emplace(feature_id,lookup_value);
         // if extra fields have been supplied, push them into grid memory
         if (!names_.empty())
         {
@@ -116,7 +134,7 @@ void hit_grid<T>::add_feature(mapnik::feature_impl & feature)
             // https://github.com/mapnik/mapnik/issues/1198
             mapnik::feature_ptr feature2(mapnik::feature_factory::create(ctx_,feature_id));
             feature2->set_data(feature.get_data());
-            features_.insert(std::make_pair(lookup_value,feature2));
+            features_.emplace(lookup_value,feature2);
         }
     }
     else
@@ -126,6 +144,8 @@ void hit_grid<T>::add_feature(mapnik::feature_impl & feature)
 }
 
 
-template class hit_grid<int>;
+template class MAPNIK_DECL hit_grid<mapnik::value_integer_pixel>;
 
 }
+
+#endif

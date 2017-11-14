@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,16 +23,19 @@
 // mapnik
 #include <mapnik/debug.hpp>
 #include <mapnik/query.hpp>
-#include <mapnik/box2d.hpp>
+#include <mapnik/geometry/box2d.hpp>
 #include <mapnik/memory_datasource.hpp>
 #include <mapnik/memory_featureset.hpp>
-#include <mapnik/feature_factory.hpp>
-
-// boost
-#include <boost/make_shared.hpp>
+#include <mapnik/boolean.hpp>
+#include <mapnik/geometry/envelope.hpp>
 
 // stl
 #include <algorithm>
+
+using mapnik::datasource;
+using mapnik::parameters;
+
+DATASOURCE_PLUGIN(mapnik::memory_datasource)
 
 namespace mapnik {
 
@@ -41,20 +44,18 @@ struct accumulate_extent
     accumulate_extent(box2d<double> & ext)
         : ext_(ext),first_(true) {}
 
-    void operator() (feature_ptr feat)
+    void operator() (feature_ptr const& feat)
     {
-        for (unsigned i=0;i<feat->num_geometries();++i)
+        auto const& geom = feat->get_geometry();
+        auto bbox = geometry::envelope(geom);
+        if ( first_ )
         {
-            geometry_type & geom = feat->get_geometry(i);
-            if ( first_ )
-            {
-                first_ = false;
-                ext_ = geom.envelope();
-            }
-            else
-            {
-                ext_.expand_to_include(geom.envelope());
-            }
+            first_ = false;
+            ext_ = bbox;
+        }
+        else
+        {
+            ext_.expand_to_include(bbox);
         }
     }
 
@@ -62,9 +63,18 @@ struct accumulate_extent
     bool first_;
 };
 
-memory_datasource::memory_datasource()
-    : datasource(parameters()),
-      desc_("in-memory datasource","utf-8") {}
+const char * memory_datasource::name()
+{
+    return "memory";
+}
+
+memory_datasource::memory_datasource(parameters const& _params)
+    : datasource(_params),
+      desc_(memory_datasource::name(),
+            *params_.get<std::string>("encoding","utf-8")),
+      type_(datasource::Vector),
+      bbox_check_(*params_.get<boolean_type>("bbox_check", true)),
+      type_set_(false) {}
 
 memory_datasource::~memory_datasource() {}
 
@@ -72,41 +82,82 @@ void memory_datasource::push(feature_ptr feature)
 {
     // TODO - collect attribute descriptors?
     //desc_.add_descriptor(attribute_descriptor(fld_name,mapnik::Integer));
+    if (feature->get_raster())
+    {
+        // if a feature has a raster_ptr set it must be of raster type.
+        if (!type_set_)
+        {
+            type_ = datasource::Raster;
+            type_set_ = true;
+        }
+        else if (type_ == datasource::Vector)
+        {
+            throw std::runtime_error("Can not add a raster feature to a memory datasource that contains vectors");
+        }
+    }
+    else
+    {
+        if (!type_set_)
+        {
+            type_set_ = true;
+        }
+        else if (type_ == datasource::Raster)
+        {
+            throw std::runtime_error("Can not add a vector feature to a memory datasource that contains rasters");
+        }
+    }
     features_.push_back(feature);
+    dirty_extent_ = true;
 }
 
 datasource::datasource_t memory_datasource::type() const
 {
-    return datasource::Vector;
+    return type_;
 }
 
 featureset_ptr memory_datasource::features(const query& q) const
 {
-    return boost::make_shared<memory_featureset>(q.get_bbox(),*this);
+    if (features_.empty())
+    {
+        return mapnik::make_invalid_featureset();
+    }
+    return std::make_shared<memory_featureset>(q.get_bbox(),*this,bbox_check_);
 }
 
 
-featureset_ptr memory_datasource::features_at_point(coord2d const& pt) const
+featureset_ptr memory_datasource::features_at_point(coord2d const& pt, double tol) const
 {
+    if (features_.empty())
+    {
+        return mapnik::make_invalid_featureset();
+    }
     box2d<double> box = box2d<double>(pt.x, pt.y, pt.x, pt.y);
-
+    box.pad(tol);
     MAPNIK_LOG_DEBUG(memory_datasource) << "memory_datasource: Box=" << box << ", Point x=" << pt.x << ",y=" << pt.y;
+    return std::make_shared<memory_featureset>(box,*this);
+}
 
-    return boost::make_shared<memory_featureset>(box,*this);
+void memory_datasource::set_envelope(box2d<double> const& box)
+{
+    extent_ = box;
+    dirty_extent_ = false;
 }
 
 box2d<double> memory_datasource::envelope() const
 {
-    box2d<double> ext;
-    accumulate_extent func(ext);
-    std::for_each(features_.begin(),features_.end(),func);
-    return ext;
+    if (!extent_.valid() || dirty_extent_)
+    {
+        accumulate_extent func(extent_);
+        std::for_each(features_.begin(),features_.end(),func);
+        dirty_extent_ = false;
+    }
+    return extent_;
 }
 
-boost::optional<datasource::geometry_t> memory_datasource::get_geometry_type() const
+boost::optional<datasource_geometry_t> memory_datasource::get_geometry_type() const
 {
     // TODO - detect this?
-    return datasource::Collection;
+    return datasource_geometry_t::Collection;
 }
 
 layer_descriptor memory_datasource::get_descriptor() const

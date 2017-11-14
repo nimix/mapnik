@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,128 +24,63 @@
 #define MAPNIK_GEOMETRY_HPP
 
 // mapnik
-#include <mapnik/vertex_vector.hpp>
-#include <mapnik/geom_util.hpp>
+#include <mapnik/geometry/point.hpp>
+#include <mapnik/geometry/line_string.hpp>
+#include <mapnik/geometry/polygon.hpp>
+#include <mapnik/geometry/multi_point.hpp>
+#include <mapnik/geometry/multi_line_string.hpp>
+#include <mapnik/geometry/multi_polygon.hpp>
+//
+#include <mapnik/util/variant.hpp>
+// stl
+#include <vector>
+#include <deque>
+#include <type_traits>
+#include <cstddef>
 
-// boost
-#include <boost/shared_ptr.hpp>
-#include <boost/utility.hpp>
-#include <boost/ptr_container/ptr_vector.hpp>
+namespace mapnik { namespace geometry {
 
-namespace mapnik {
+template <typename T, template <typename...> class Cont = std::vector>
+struct geometry_collection;
 
-enum eGeomType {
-    Unknown = 0,
-    Point = 1,
-    LineString = 2,
-    Polygon = 3
-};
+struct geometry_empty {};
 
-template <typename T, template <typename> class Container=vertex_vector>
-class geometry : private::boost::noncopyable
+template <typename T>
+using geometry_base = mapnik::util::variant<geometry_empty,
+                                            point<T>,
+                                            line_string<T>,
+                                            polygon<T>,
+                                            multi_point<T>,
+                                            multi_line_string<T>,
+                                            multi_polygon<T>,
+                                            geometry_collection<T> >;
+template <typename T>
+struct geometry : geometry_base<T>
 {
-public:
-    typedef T coord_type;
-    typedef Container<coord_type> container_type;
-    typedef typename container_type::value_type value_type;
-    typedef typename container_type::size_type size_type;
-private:
-    container_type cont_;
-    eGeomType type_;
-    mutable unsigned itr_;
-public:
+    using coordinate_type = T;
 
-    geometry()
-        : type_(Unknown),
-          itr_(0)
-    {}
+#if __cpp_inheriting_constructors >= 200802
 
-    explicit geometry(eGeomType type)
-        : type_(type),
-          itr_(0)
-    {}
+    using geometry_base<T>::geometry_base;
 
-    eGeomType type() const
-    {
-        return type_;
-    }
+#else
 
-    void set_type(eGeomType type)
-    {
-        type_ = type;
-    }
+    geometry() = default;
 
-    container_type const& data() const
-    {
-        return cont_;
-    }
+    template <typename G>
+    geometry(G && geom)
+        : geometry_base<T>(std::forward<G>(geom)) {}
 
-    size_type size() const
-    {
-        return cont_.size();
-    }
-
-    box2d<double> envelope() const
-    {
-        box2d<double> result;
-        double x = 0;
-        double y = 0;
-        rewind(0);
-        for (unsigned i=0;i<size();++i)
-        {
-            vertex(&x,&y);
-            if (i==0)
-            {
-                result.init(x,y,x,y);
-            }
-            else
-            {
-                result.expand_to_include(x,y);
-            }
-        }
-        return result;
-    }
-
-    void push_vertex(coord_type x, coord_type y, CommandType c)
-    {
-        cont_.push_back(x,y,c);
-    }
-
-    void line_to(coord_type x,coord_type y)
-    {
-        push_vertex(x,y,SEG_LINETO);
-    }
-
-    void move_to(coord_type x,coord_type y)
-    {
-        push_vertex(x,y,SEG_MOVETO);
-    }
-
-    void close(coord_type x, coord_type y)
-    {
-        push_vertex(x,y,SEG_CLOSE);
-    }
-
-    unsigned vertex(double* x, double* y) const
-    {
-        return cont_.get_vertex(itr_++,x,y);
-    }
-
-    unsigned vertex(std::size_t index, double* x, double* y) const
-    {
-        return cont_.get_vertex(index, x, y);
-    }
-
-    void rewind(unsigned ) const
-    {
-        itr_=0;
-    }
+#endif
 };
 
-typedef geometry<double,vertex_vector> geometry_type;
-typedef boost::shared_ptr<geometry_type> geometry_ptr;
-typedef boost::ptr_vector<geometry_type> geometry_container;
 
-}
+template <typename T, template <typename...> class Cont>
+struct geometry_collection : Cont<geometry<T>>
+{
+    using coordinate_type = T;
+};
 
-#endif // MAPNIK_GEOMETRY_HPP
+}}
+
+#endif //MAPNIK_GEOMETRY_HPP

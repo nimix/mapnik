@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,13 +24,13 @@
 #define MAPNIK_SQLITE_FEATURESET_HPP
 
 // mapnik
-#include <mapnik/datasource.hpp>
+#include <mapnik/feature.hpp>
 #include <mapnik/unicode.hpp>
 #include <mapnik/wkb.hpp>
 
 // boost
-#include <boost/scoped_ptr.hpp>
-#include <boost/shared_ptr.hpp>
+
+#include <memory>
 
 // sqlite
 #include "sqlite_resultset.hpp"
@@ -39,22 +39,24 @@
 class sqlite_featureset : public mapnik::Featureset
 {
 public:
-    sqlite_featureset(boost::shared_ptr<sqlite_resultset> rs,
+    sqlite_featureset(std::shared_ptr<sqlite_resultset> rs,
                       mapnik::context_ptr const& ctx,
                       std::string const& encoding,
                       mapnik::box2d<double> const& bbox,
                       mapnik::wkbFormat format,
+                      bool twkb_encoding,
                       bool spatial_index,
                       bool using_subquery);
     virtual ~sqlite_featureset();
     mapnik::feature_ptr next();
 
 private:
-    boost::shared_ptr<sqlite_resultset> rs_;
+    std::shared_ptr<sqlite_resultset> rs_;
     mapnik::context_ptr ctx_;
-    boost::scoped_ptr<mapnik::transcoder> tr_;
-    mapnik::box2d<double> const& bbox_;
+    const std::unique_ptr<mapnik::transcoder> tr_;
+    mapnik::box2d<double> bbox_;
     mapnik::wkbFormat format_;
+    bool twkb_encoding_;
     bool spatial_index_;
     bool using_subquery_;
 

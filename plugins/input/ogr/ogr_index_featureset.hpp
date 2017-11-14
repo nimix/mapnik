@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,7 +25,8 @@
 
 #include <set>
 #include <vector>
-#include <boost/scoped_ptr.hpp>
+
+#include <mapnik/feature.hpp>
 #include "ogr_featureset.hpp"
 
 template <typename filterT>
@@ -47,8 +48,9 @@ private:
     filterT filter_;
     std::vector<int> ids_;
     std::vector<int>::iterator itr_;
-    boost::scoped_ptr<mapnik::transcoder> tr_;
+    const std::unique_ptr<mapnik::transcoder> tr_;
     const char* fidcolumn_;
+    OGREnvelope feature_envelope_;
 };
 
 #endif // OGR_INDEX_FEATURESET_HPP

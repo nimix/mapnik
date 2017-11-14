@@ -16,8 +16,8 @@
 #ifndef AGG_PATH_STORAGE_INCLUDED
 #define AGG_PATH_STORAGE_INCLUDED
 
-#include <string.h>
-#include <math.h>
+#include <cstring>
+#include <cmath>
 #include "agg_math.h"
 #include "agg_array.h"
 #include "agg_bezier_arc.h"
@@ -956,8 +956,8 @@ namespace agg
             double y0 = 0.0;
             m_vertices.last_vertex(&x0, &y0);
 
-            rx = fabs(rx);
-            ry = fabs(ry);
+            rx = std::fabs(rx);
+            ry = std::fabs(ry);
 
             // Ensure radii are valid
             //-------------------------

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,19 +23,20 @@
 #ifndef SHAPE_IO_HPP
 #define SHAPE_IO_HPP
 
+// stl
+#include <memory>
+#include <ios>
 // mapnik
-#include <mapnik/geometry.hpp>
-#include <mapnik/datasource.hpp>
-
+#include <mapnik/geometry/box2d.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/util/spatial_index.hpp>
 // boost
-#include <boost/utility.hpp>
-#include <boost/shared_ptr.hpp>
-
+#include <boost/optional.hpp>
+//
 #include "dbfile.hpp"
 #include "shapefile.hpp"
-#include "shp_index.hpp"
 
-struct shape_io : boost::noncopyable
+struct shape_io : mapnik::util::noncopyable
 {
 public:
     enum shapeType
@@ -56,36 +57,49 @@ public:
         shape_multipatch = 31
     };
 
-    shape_io(const std::string& shape_name, bool open_index=true);
+    shape_io(std::string const& shape_name, bool open_index=true);
     ~shape_io();
 
     shape_file& shp();
+    shape_file& shx();
     dbf_file& dbf();
 
-    inline boost::shared_ptr<shape_file>& index()
+    inline boost::optional<shape_file&> index()
     {
-        return index_;
+        if (index_) return boost::optional<shape_file&>(*index_);
+        return boost::optional<shape_file&>();
     }
 
     inline bool has_index() const
     {
-        return (index_ && index_->is_open());
+        if (index_ && index_->is_open())
+        {
+            bool status = mapnik::util::check_spatial_index(index_->file());
+            index_->seek(0);// rewind
+            return status;
+        }
+        return false;
     }
 
-    void move_to(int id);
-    shapeType type() const;
-    const box2d<double>& current_extent() const;
-    void read_polyline(mapnik::geometry_container & geom);
-    void read_polygon(mapnik::geometry_container & geom);
+    inline int id() const { return id_;}
+    void move_to(std::streampos pos);
+    static void read_bbox(shape_file::record_type & record, mapnik::box2d<double> & bbox);
+    static mapnik::geometry::geometry<double> read_polyline(shape_file::record_type & record);
+    static mapnik::geometry::geometry<double> read_polygon(shape_file::record_type & record);
+    static mapnik::geometry::geometry<double> read_polyline_parts(shape_file::record_type & record,std::vector<std::pair<int,int>> const& parts);
+    static mapnik::geometry::geometry<double> read_polygon_parts(shape_file::record_type & record, std::vector<std::pair<int,int>> const& parts);
+
     shapeType type_;
     shape_file shp_;
+    shape_file shx_;
     dbf_file   dbf_;
-    boost::shared_ptr<shape_file> index_;
-    unsigned reclength_;
-    unsigned id_;
+    std::unique_ptr<shape_file> index_;
+    int reclength_;
+    int id_;
     box2d<double> cur_extent_;
 
     static const std::string SHP;
+    static const std::string SHX;
     static const std::string DBF;
     static const std::string INDEX;
 };

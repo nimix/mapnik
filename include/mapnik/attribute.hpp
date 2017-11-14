@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,19 +24,20 @@
 #define MAPNIK_ATTRIBUTE_HPP
 
 // mapnik
+#include <mapnik/value/types.hpp>
 #include <mapnik/value.hpp>
-#include <mapnik/geometry.hpp>
-
+#include <mapnik/util/geometry_to_ds_type.hpp>
 // stl
 #include <string>
+#include <unordered_map>
 
 namespace mapnik {
 
 struct attribute
 {
     std::string name_;
-    explicit attribute(std::string const& name)
-        : name_(name) {}
+    explicit attribute(std::string const& _name)
+        : name_(_name) {}
 
     template <typename V ,typename F>
     V const& value(F const& f) const
@@ -52,20 +53,24 @@ struct geometry_type_attribute
     template <typename V, typename F>
     V value(F const& f) const
     {
-        int type = 0;
-        geometry_container::const_iterator itr = f.paths().begin();
-        geometry_container::const_iterator end = f.paths().end();
-        for ( ; itr != end; ++itr)
-        {
-            if (type != 0 && itr->type() != type)
-            {
-                return 4; // Collection
-            }
-            type = itr->type();
-        }
-        return type;
+        return static_cast<mapnik::value_integer>(util::to_ds_type(f.get_geometry()));
     }
 };
+
+struct global_attribute
+{
+    std::string name;
+    explicit global_attribute(std::string const& name_)
+        : name(name_) {}
+
+    template <typename V, typename C>
+    V const& operator() (C const& ctx)
+    {
+        return ctx.get(name);
+    }
+};
+
+using attributes = std::unordered_map<std::string, value>;
 
 }
 

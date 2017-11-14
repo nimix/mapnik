@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,23 +24,27 @@
 #define MAPNIK_GRID_PIXFMT_HPP
 
 #include <string>
+#include <mapnik/grid/grid_rendering_buffer.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include "agg_basics.h"
 #include <mapnik/grid/grid_pixel.hpp>
-#include <mapnik/grid/grid_rendering_buffer.hpp>
+#pragma GCC diagnostic pop
 
 namespace mapnik
 {
 
 //============================================================blender_gray
-template<class ColorT> struct blender_gray
+template<typename ColorT> struct blender_gray
 {
-    typedef ColorT color_type;
-    typedef typename color_type::value_type value_type;
-    typedef typename color_type::calc_type calc_type;
+    using color_type = ColorT;
+    using value_type = typename color_type::value_type;
+    using calc_type = typename color_type::calc_type;
     enum base_scale_e { base_shift = color_type::base_shift };
 
     static AGG_INLINE void blend_pix(value_type* p, unsigned cv,
-                                     unsigned alpha, unsigned cover=0)
+                                     unsigned alpha, unsigned /*cover*/=0)
     {
         *p = (value_type)((((cv - calc_type(*p)) * alpha) + (calc_type(*p) << base_shift)) >> base_shift);
     }
@@ -49,10 +53,10 @@ template<class ColorT> struct blender_gray
 
 
 //=====================================================apply_gamma_dir_gray
-template<class ColorT, class GammaLut> class apply_gamma_dir_gray
+template<typename ColorT, class GammaLut> class apply_gamma_dir_gray
 {
 public:
-    typedef typename ColorT::value_type value_type;
+    using value_type = typename ColorT::value_type;
 
     apply_gamma_dir_gray(const GammaLut& gamma) : m_gamma(gamma) {}
 
@@ -68,10 +72,10 @@ private:
 
 
 //=====================================================apply_gamma_inv_gray
-template<class ColorT, class GammaLut> class apply_gamma_inv_gray
+template<typename ColorT, class GammaLut> class apply_gamma_inv_gray
 {
 public:
-    typedef typename ColorT::value_type value_type;
+    using value_type = typename ColorT::value_type;
 
     apply_gamma_inv_gray(const GammaLut& gamma) : m_gamma(gamma) {}
 
@@ -87,17 +91,17 @@ private:
 
 
 //=================================================pixfmt_alpha_blend_gray
-template<class Blender, class RenBuf, unsigned Step=1, unsigned Offset=0>
+template<typename Blender, class RenBuf, unsigned Step=1, unsigned Offset=0>
 class pixfmt_alpha_blend_gray
 {
 public:
-    typedef RenBuf   rbuf_type;
-    typedef typename rbuf_type::row_data row_data;
-    typedef Blender  blender_type;
-    typedef typename blender_type::color_type color_type;
-    typedef int                               order_type; // A fake one
-    typedef typename color_type::value_type   value_type;
-    typedef typename color_type::calc_type    calc_type;
+    using rbuf_type = RenBuf  ;
+    using row_data = typename rbuf_type::row_data;
+    using blender_type = Blender ;
+    using color_type = typename blender_type::color_type;
+    using order_type = int                              ; // A fake one
+    using value_type = typename color_type::value_type  ;
+    using calc_type = typename color_type::calc_type   ;
     enum base_scale_e
     {
         base_shift = color_type::base_shift,
@@ -154,7 +158,7 @@ public:
     void attach(rbuf_type& rb) { m_rbuf = &rb; }
     //--------------------------------------------------------------------
 
-    template<class PixFmt>
+    template<typename PixFmt>
     bool attach(PixFmt& pixf, int x1, int y1, int x2, int y2)
     {
         agg::rect_i r(x1, y1, x2, y2);
@@ -256,9 +260,18 @@ public:
     void blend_hline(int x, int y,
                      unsigned len,
                      const color_type& c,
-                     agg::int8u cover)
+                     agg::int8u /*cover*/)
     {
-        if (c.a)
+        value_type* p = (value_type*)
+            m_rbuf->row_ptr(x, y, len) + x * Step + Offset;
+        do
+        {
+            *p = c.v;
+            p += Step;
+        }
+        while(--len);
+        // We ignore alpha since grid_renderer is a binary renderer for now
+        /*if (c.a)
         {
             value_type* p = (value_type*)
                 m_rbuf->row_ptr(x, y, len) + x * Step + Offset;
@@ -282,7 +295,7 @@ public:
                 }
                 while(--len);
             }
-        }
+        }*/
     }
 
 
@@ -523,10 +536,10 @@ public:
     }
 
     //--------------------------------------------------------------------
-    template<class Function> void for_each_pixel(Function f)
+    template <typename Function>
+    void for_each_pixel(Function f)
     {
-        unsigned y;
-        for(y = 0; y < height(); ++y)
+        for(unsigned y = 0; y < height(); ++y)
         {
             row_data r = m_rbuf->row(y);
             if(r.ptr)
@@ -547,19 +560,19 @@ public:
     }
 
     //--------------------------------------------------------------------
-    template<class GammaLut> void apply_gamma_dir(const GammaLut& g)
+    template<typename GammaLut> void apply_gamma_dir(const GammaLut& g)
     {
         for_each_pixel(apply_gamma_dir_gray<color_type, GammaLut>(g));
     }
 
     //--------------------------------------------------------------------
-    template<class GammaLut> void apply_gamma_inv(const GammaLut& g)
+    template<typename GammaLut> void apply_gamma_inv(const GammaLut& g)
     {
         for_each_pixel(apply_gamma_inv_gray<color_type, GammaLut>(g));
     }
 
     //--------------------------------------------------------------------
-    template<class RenBuf2>
+    template<typename RenBuf2>
     void copy_from(const RenBuf2& from,
                    int xdst, int ydst,
                    int xsrc, int ysrc,
@@ -575,15 +588,15 @@ public:
     }
 
     //--------------------------------------------------------------------
-    template<class SrcPixelFormatRenderer>
+    template<typename SrcPixelFormatRenderer>
     void blend_from_color(const SrcPixelFormatRenderer& from,
                           const color_type& color,
                           int xdst, int ydst,
-                          int xsrc, int ysrc,
+                          int /*xsrc*/, int ysrc,
                           unsigned len,
                           agg::int8u cover)
     {
-        typedef typename SrcPixelFormatRenderer::value_type src_value_type;
+        using src_value_type = typename SrcPixelFormatRenderer::value_type;
         const src_value_type* psrc = (src_value_type*)from.row_ptr(ysrc);
         if(psrc)
         {
@@ -602,15 +615,15 @@ public:
     }
 
     //--------------------------------------------------------------------
-    template<class SrcPixelFormatRenderer>
+    template<typename SrcPixelFormatRenderer>
     void blend_from_lut(const SrcPixelFormatRenderer& from,
                         const color_type* color_lut,
                         int xdst, int ydst,
-                        int xsrc, int ysrc,
+                        int /*xsrc*/, int ysrc,
                         unsigned len,
                         agg::int8u cover)
     {
-        typedef typename SrcPixelFormatRenderer::value_type src_value_type;
+        using src_value_type = typename SrcPixelFormatRenderer::value_type;
         const src_value_type* psrc = (src_value_type*)from.row_ptr(ysrc);
         if(psrc)
         {
@@ -630,17 +643,21 @@ private:
     rbuf_type* m_rbuf;
 };
 
-typedef blender_gray<gray16> blender_gray16;
+using blender_gray16 = blender_gray<gray16>;
 
-typedef pixfmt_alpha_blend_gray<blender_gray16,
-                                mapnik::grid_rendering_buffer> pixfmt_gray16;     //----pixfmt_gray16
+using pixfmt_gray16 =  pixfmt_alpha_blend_gray<blender_gray16,
+                                               mapnik::grid_rendering_buffer>;     //----pixfmt_gray16
 
-typedef blender_gray<gray32> blender_gray32;
+using blender_gray32 = blender_gray<gray32>;
 
-typedef pixfmt_alpha_blend_gray<blender_gray32,
-                                mapnik::grid_rendering_buffer> pixfmt_gray32;     //----pixfmt_gray16
+using  pixfmt_gray32 = pixfmt_alpha_blend_gray<blender_gray32,
+                                               mapnik::grid_rendering_buffer>;     //----pixfmt_gray32
+
+using blender_gray64 = blender_gray<gray64>;
+
+using pixfmt_gray64 = pixfmt_alpha_blend_gray<blender_gray64,
+                                              mapnik::grid_rendering_buffer>;     //----pixfmt_gray64
 
 }
 
 #endif
-

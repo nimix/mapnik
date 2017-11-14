@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2006 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,40 +19,37 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
-//$Id: shapeindex.cc 27 2005-03-30 21:45:40Z pavlenko $
-
 
 #include <iostream>
 #include <vector>
 #include <string>
-
-#include <boost/tokenizer.hpp>
-#include <boost/algorithm/string.hpp>
-#include <boost/filesystem/operations.hpp>
-#include <boost/program_options.hpp>
-#include "quadtree.hpp"
+#include <mapnik/version.hpp>
+#include <mapnik/util/fs.hpp>
+#include <mapnik/quad_tree.hpp>
+//#include <mapnik/util/spatial_index.hpp>
+#include <mapnik/geometry/envelope.hpp>
 #include "shapefile.hpp"
 #include "shape_io.hpp"
+#include "shape_index_featureset.hpp"
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/algorithm/string.hpp>
+#include <boost/program_options.hpp>
+#pragma GCC diagnostic pop
 
-const int MAXDEPTH = 64;
 const int DEFAULT_DEPTH = 8;
-const double MINRATIO=0.5;
-const double MAXRATIO=0.8;
-const double DEFAULT_RATIO=0.55;
+const double DEFAULT_RATIO = 0.55;
 
 int main (int argc,char** argv)
 {
     using namespace mapnik;
     namespace po = boost::program_options;
-    using std::string;
-    using std::vector;
-    using std::clog;
-    using std::endl;
 
     bool verbose=false;
-    unsigned int depth=DEFAULT_DEPTH;
-    double ratio=DEFAULT_RATIO;
-    vector<string> shape_files;
+    bool index_parts = false;
+    unsigned int depth = DEFAULT_DEPTH;
+    double ratio = DEFAULT_RATIO;
+    std::vector<std::string> shape_files;
 
     try
     {
@@ -60,10 +57,11 @@ int main (int argc,char** argv)
         desc.add_options()
             ("help,h", "produce usage message")
             ("version,V","print version string")
+            ("index-parts","index individual shape parts (default: no)")
             ("verbose,v","verbose output")
             ("depth,d", po::value<unsigned int>(), "max tree depth\n(default 8)")
             ("ratio,r",po::value<double>(),"split ratio (default 0.55)")
-            ("shape_files",po::value<vector<string> >(),"shape files to index: file1 file2 ...fileN")
+            ("shape_files",po::value<std::vector<std::string> >(),"shape files to index: file1 file2 ...fileN")
             ;
 
         po::positional_options_description p;
@@ -74,18 +72,22 @@ int main (int argc,char** argv)
 
         if (vm.count("version"))
         {
-            clog<<"version 0.3.0" <<std::endl;
-            return 1;
+            std::clog << "version " << MAPNIK_VERSION_STRING << std::endl;
+            return EXIT_FAILURE;
         }
 
         if (vm.count("help"))
         {
-            clog << desc << endl;
-            return 1;
+            std::clog << desc << std::endl;
+            return EXIT_FAILURE;
         }
         if (vm.count("verbose"))
         {
             verbose = true;
+        }
+        if (vm.count("index-parts"))
+        {
+            index_parts = true;
         }
         if (vm.count("depth"))
         {
@@ -98,145 +100,207 @@ int main (int argc,char** argv)
 
         if (vm.count("shape_files"))
         {
-            shape_files=vm["shape_files"].as< vector<string> >();
+            shape_files=vm["shape_files"].as< std::vector<std::string> >();
         }
     }
-    catch (...)
+    catch (std::exception const& ex)
     {
-        clog << "Exception of unknown type!" << endl;
-        return -1;
+        std::clog << "Error: " << ex.what() << std::endl;
+        return EXIT_FAILURE;
     }
 
-    clog << "max tree depth:" << depth << endl;
-    clog << "split ratio:" << ratio << endl;
+    std::clog << "max tree depth:" << depth << std::endl;
+    std::clog << "split ratio:" << ratio << std::endl;
 
-    vector<string>::const_iterator itr = shape_files.begin();
-    if (itr == shape_files.end())
+    if (shape_files.size() == 0)
     {
-        clog << "no shape files to index" << endl;
-        return 0;
+        std::clog << "no shape files to index" << std::endl;
+        return EXIT_FAILURE;
     }
-    while (itr != shape_files.end())
+    for (auto const& filename : shape_files)
     {
-        clog << "processing " << *itr << endl;
-        std::string shapename (*itr++);
+        std::clog << "processing " << filename << std::endl;
+        std::string shapename (filename);
         boost::algorithm::ireplace_last(shapename,".shp","");
-        std::string shapename_full (shapename+".shp");
-
-        if (! boost::filesystem::exists (shapename_full))
+        std::string shapename_full (shapename + ".shp");
+        std::string shxname(shapename + ".shx");
+        if (! mapnik::util::exists (shapename_full))
         {
-            clog << "error : file " << shapename_full << " does not exist" << endl;
+            std::clog << "Error : file " << shapename_full << " does not exist" << std::endl;
             continue;
         }
-
+        if (! mapnik::util::exists(shxname))
+        {
+            std::clog << "Error : shapefile index file (*.shx) " << shxname << " does not exist" << std::endl;
+            continue;
+        }
         shape_file shp (shapename_full);
 
-        if (! shp.is_open()) {
-            clog << "error : cannot open " << shapename_full << endl;
+        if (! shp.is_open())
+        {
+            std::clog << "Error : cannot open " << shapename_full << std::endl;
             continue;
         }
 
-        int code = shp.read_xdr_integer(); //file_code == 9994
-        clog << code << endl;
-        shp.skip(5*4);
+        shape_file shx (shxname);
+        if (!shx.is_open())
+        {
+            std::clog << "Error : cannot open " << shxname << std::endl;
+            continue;
+        }
 
-        int file_length=shp.read_xdr_integer();
-        int version=shp.read_ndr_integer();
-        int shape_type=shp.read_ndr_integer();
+        int code = shx.read_xdr_integer(); //file_code == 9994
+        std::clog << code << std::endl;
+        shx.skip(5*4);
+
+        int file_length=shx.read_xdr_integer();
+        int version=shx.read_ndr_integer();
+        int shape_type=shx.read_ndr_integer();
         box2d<double> extent;
-        shp.read_envelope(extent);
+        shx.read_envelope(extent);
 
 
-        clog << "length=" << file_length << endl;
-        clog << "version=" << version << endl;
-        clog << "type=" << shape_type << endl;
-        clog << "extent:" << extent << endl;
+        std::clog << "length=" << file_length << std::endl;
+        std::clog << "version=" << version << std::endl;
+        std::clog << "type=" << shape_type << std::endl;
+        std::clog << "extent:" << extent << std::endl;
 
-        int pos=50;
-        shp.seek(pos*2);
-        quadtree<int> tree(extent,depth,ratio);
-        int count=0;
-        while (true) {
+        if (!extent.valid() || std::isnan(extent.width()) || std::isnan(extent.height()))
+        {
+            std::clog << "Invalid extent aborting..." << std::endl;
+            return EXIT_FAILURE;
+        }
+        int pos = 50;
+        shx.seek(pos * 2);
+        mapnik::box2d<float> extent_f { static_cast<float>(extent.minx()),
+                static_cast<float>(extent.miny()),
+                static_cast<float>(extent.maxx()),
+                static_cast<float>(extent.maxy())};
 
-            long offset=shp.pos();
-            int record_number=shp.read_xdr_integer();
-            int content_length=shp.read_xdr_integer();
-            shape_type = shp.read_ndr_integer();
-            box2d<double> item_ext;
-            if (shape_type==shape_io::shape_null)
+        mapnik::quad_tree<mapnik::detail::node, mapnik::box2d<float> > tree(extent_f, depth, ratio);
+        int count = 0;
+
+        if (shape_type != shape_io::shape_null)
+        {
+            while (shx.is_good() && pos <= file_length - 4)
             {
-                // still need to increment pos, or the pos counter
-                // won't indicate EOF until too late.
-                pos+=4+content_length;
-                continue;
-            }
-            else if (shape_type==shape_io::shape_point)
-            {
-                double x=shp.read_double();
-                double y=shp.read_double();
-                item_ext=box2d<double>(x,y,x,y);
-
-            }
-            else if (shape_type==shape_io::shape_pointm)
-            {
-                double x=shp.read_double();
-                double y=shp.read_double();
-                // skip m
-                shp.read_double();
-                item_ext=box2d<double>(x,y,x,y);
-
-            }
-            else if (shape_type==shape_io::shape_pointz)
-            {
-                double x=shp.read_double();
-                double y=shp.read_double();
-                // skip z
-                shp.read_double();
-                //skip m if exists
-                if ( content_length == 8 + 36)
+                int offset = shx.read_xdr_integer();
+                int shx_content_length = shx.read_xdr_integer();
+                pos += 4;
+                box2d<double> item_ext;
+                shp.seek(offset * 2);
+                int record_number = shp.read_xdr_integer();
+                int shp_content_length = shp.read_xdr_integer();
+                if (shx_content_length != shp_content_length)
                 {
-                    shp.read_double();
+                    if (verbose)
+                    {
+                        std::clog << "Content length mismatch for record number " << record_number << std::endl;
+                    }
+                    continue;
                 }
-                item_ext=box2d<double>(x,y,x,y);
-            }
+                shape_type = shp.read_ndr_integer();
 
-            else
-            {
-                shp.read_envelope(item_ext);
-                shp.skip(2*content_length-4*8-4);
-            }
+                if (shape_type == shape_io::shape_null) continue;
 
-            tree.insert(offset,item_ext);
-            if (verbose) {
-                clog << "record number " << record_number << " box=" << item_ext << endl;
-            }
+                if (shape_type==shape_io::shape_point
+                    || shape_type==shape_io::shape_pointm
+                    || shape_type == shape_io::shape_pointz)
+                {
+                    double x=shp.read_double();
+                    double y=shp.read_double();
+                    item_ext=box2d<double>(x,y,x,y);
+                }
+                else if (index_parts &&
+                         (shape_type == shape_io::shape_polygon || shape_type == shape_io::shape_polygonm || shape_type == shape_io::shape_polygonz
+                          || shape_type == shape_io::shape_polyline || shape_type == shape_io::shape_polylinem || shape_type == shape_io::shape_polylinez))
+                {
+                    shp.read_envelope(item_ext);
+                    int num_parts = shp.read_ndr_integer();
+                    int num_points = shp.read_ndr_integer();
+                    std::vector<int> parts;
+                    parts.resize(num_parts);
+                    std::for_each(parts.begin(), parts.end(), [&](int & part) { part = shp.read_ndr_integer();});
+                    for (int k = 0; k < num_parts; ++k)
+                    {
+                        int start = parts[k];
+                        int end;
+                        if (k == num_parts - 1) end = num_points;
+                        else end = parts[k + 1];
 
-            pos+=4+content_length;
-            ++count;
+                        mapnik::geometry::linear_ring<double> ring;
+                        ring.reserve(end - start);
+                        for (int j = start; j < end; ++j)
+                        {
+                            double x = shp.read_double();
+                            double y = shp.read_double();
+                            ring.emplace_back(x, y);
+                        }
+                        item_ext = mapnik::geometry::envelope(ring);
+                        if (item_ext.valid())
+                        {
+                            if (verbose)
+                            {
+                                std::clog << "record number " << record_number << " box=" << item_ext << std::endl;
+                            }
+                            mapnik::box2d<float> ext_f {static_cast<float>(item_ext.minx()),
+                                    static_cast<float>(item_ext.miny()),
+                                    static_cast<float>(item_ext.maxx()),
+                                    static_cast<float>(item_ext.maxy())};
+                            tree.insert(mapnik::detail::node(offset * 2, start, end, std::move(ext_f)), ext_f);
+                            ++count;
+                        }
+                    }
+                    item_ext = mapnik::box2d<double>(); //invalid
+                }
+                else
+                {
+                    shp.read_envelope(item_ext);
+                }
 
-            if (pos>=file_length) {
-                break;
+                if (item_ext.valid())
+                {
+                    if (verbose)
+                    {
+                        std::clog << "record number " << record_number << " box=" << item_ext << std::endl;
+                    }
+                    mapnik::box2d<float> ext_f {static_cast<float>(item_ext.minx()),
+                            static_cast<float>(item_ext.miny()),
+                            static_cast<float>(item_ext.maxx()),
+                            static_cast<float>(item_ext.maxy())};
+
+                    tree.insert(mapnik::detail::node(offset * 2, -1, 0, std::move(ext_f)), ext_f);
+                    ++count;
+                }
             }
         }
 
-        clog << " number shapes=" << count << endl;
-
-        std::fstream file((shapename+".index").c_str(),
-                          std::ios::in | std::ios::out | std::ios::trunc | std::ios::binary);
-        if (!file) {
-            clog << "cannot open index file for writing file \""
-                 << (shapename+".index") << "\"" << endl;
-        } else {
-            tree.trim();
-            std::clog<<" number nodes="<<tree.count()<<std::endl;
-            file.exceptions(std::ios::failbit | std::ios::badbit);
-            tree.write(file);
-            file.flush();
-            file.close();
+        if (count > 0)
+        {
+            std::clog << " number shapes=" << count << std::endl;
+            std::ofstream file((shapename+".index").c_str(), std::ios::trunc | std::ios::binary);
+            if (!file)
+            {
+                std::clog << "cannot open index file for writing file \""
+                          << (shapename+".index") << "\"" << std::endl;
+            }
+            else
+            {
+                tree.trim();
+                std::clog << " number nodes=" << tree.count() << std::endl;
+                file.exceptions(std::ios::failbit | std::ios::badbit);
+                tree.write(file);
+                file.flush();
+                file.close();
+            }
+        }
+        else
+        {
+            std::clog << "Failed to read any features from \"" << filename << "\"" << std::endl;
+            return EXIT_FAILURE;
         }
     }
 
-    clog << "done!" << endl;
-    return 0;
+    std::clog << "done!" << std::endl;
+    return EXIT_SUCCESS;
 }
-

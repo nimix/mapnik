@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,14 +23,15 @@
 #ifndef MAPNIK_PARAMS_HPP
 #define MAPNIK_PARAMS_HPP
 
-// boost
-#include <boost/variant.hpp>
-#include <boost/optional.hpp>
-#include <boost/none.hpp>
-#include <boost/lexical_cast.hpp>
-
 // mapnik
-#include <mapnik/value.hpp>
+#include <mapnik/config.hpp>
+#include <mapnik/value/types.hpp>
+#include <mapnik/util/variant.hpp>
+
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/optional.hpp>
+#pragma GCC diagnostic pop
 
 // stl
 #include <string>
@@ -38,71 +39,82 @@
 
 namespace mapnik
 {
-typedef boost::variant<value_null,int,double,std::string> value_holder;
-typedef std::pair<std::string, value_holder> parameter;
-typedef std::map<std::string, value_holder> param_map;
 
-template <typename T>
-struct value_extractor_visitor : public boost::static_visitor<>
+// fwd declare
+class boolean_type;
+
+using value_holder_base = util::variant<value_null,value_integer,value_double,std::string,value_bool>;
+
+struct value_holder : value_holder_base
 {
-    value_extractor_visitor(boost::optional<T> & var)
-        :var_(var) {}
+    // default
+    value_holder()
+        : value_holder_base() {}
 
-    void operator () (T val) const
-    {
-        var_ = val;
-    }
+    // C-string -> std::string
+    value_holder(char const* str)
+        : value_holder(std::string(str)) {}
 
-    template <typename T1>
-    void operator () (T1 val) const
-    {
-        try
-        {
-            var_ = boost::lexical_cast<T>(val);
-        }
-        catch (boost::bad_lexical_cast & ) {}
-    }
-
-    boost::optional<T> & var_;
+    // perfect forwarding
+    template <typename T>
+    value_holder(T && obj)
+        noexcept(std::is_nothrow_constructible<value_holder_base, T && >::value)
+        : value_holder_base(std::forward<T>(obj))
+    {}
 };
 
+using parameter = std::pair<std::string, value_holder>;
+using param_map = std::map<std::string, value_holder>;
 
-class parameters : public param_map
+class MAPNIK_DECL parameters : public param_map
 {
-    template <typename T>
-    struct converter
-    {
-        typedef boost::optional<T> return_type;
-        static return_type extract(parameters const& params,
-                                   std::string const& name,
-                                   boost::optional<T> const& default_value)
-        {
-            boost::optional<T> result(default_value);
-            parameters::const_iterator itr = params.find(name);
-            if (itr != params.end())
-            {
-                boost::apply_visitor(value_extractor_visitor<T>(result),itr->second);
-            }
-            return result;
-        }
-    };
-
 public:
-
     parameters() {}
-
     template <typename T>
-    boost::optional<T> get(std::string const& key) const
-    {
-        return converter<T>::extract(*this,key, boost::none);
-    }
-
+    boost::optional<T> get(std::string const& key) const;
     template <typename T>
-    boost::optional<T> get(std::string const& key, T const& default_value) const
-    {
-        return converter<T>::extract(*this,key,boost::optional<T>(default_value));
-    }
+    boost::optional<T> get(std::string const& key, T const& default_opt_value) const;
+
 };
+
+#ifdef _MSC_VER
+template MAPNIK_DECL
+boost::optional<std::string> parameters::get(std::string const& key) const;
+template MAPNIK_DECL
+boost::optional<std::string> parameters::get(std::string const& key,
+                                 std::string const& default_opt_value) const;
+template MAPNIK_DECL
+boost::optional<value_double> parameters::get(std::string const& key) const;
+template MAPNIK_DECL
+boost::optional<value_double> parameters::get(std::string const& key,
+                                  value_double const& default_opt_value) const;
+
+template MAPNIK_DECL
+boost::optional<value_integer> parameters::get(std::string const& key) const;
+template MAPNIK_DECL
+boost::optional<value_integer> parameters::get(std::string const& key,
+                                   value_integer const& default_opt_value) const;
+
+template MAPNIK_DECL
+boost::optional<value_bool> parameters::get(std::string const& key) const;
+template MAPNIK_DECL
+boost::optional<value_bool> parameters::get(std::string const& key,
+                                         value_bool const& default_opt_value) const;
+
+template MAPNIK_DECL
+boost::optional<mapnik::boolean_type> parameters::get(std::string const& key) const;
+template MAPNIK_DECL
+boost::optional<mapnik::boolean_type> parameters::get(std::string const& key,
+                                         mapnik::boolean_type const& default_opt_value) const;
+
+template MAPNIK_DECL
+boost::optional<mapnik::value_null> parameters::get(std::string const& key) const;
+template MAPNIK_DECL
+boost::optional<mapnik::value_null> parameters::get(std::string const& key,
+                                         mapnik::value_null const& default_opt_value) const;
+
+#endif
+
 }
 
 #endif // MAPNIK_PARAMS_HPP

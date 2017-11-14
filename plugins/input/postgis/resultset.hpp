@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,47 +45,14 @@ public:
     virtual const char* getValue(const char* name) const = 0;
 };
 
-class ResultSet : public IResultSet
+class ResultSet : public IResultSet, private mapnik::util::noncopyable
 {
 public:
     ResultSet(PGresult *res)
       : res_(res),
-        pos_(-1),
-        refCount_(new int(1))
+        pos_(-1)
     {
         numTuples_ = PQntuples(res_);
-    }
-
-    ResultSet(const ResultSet& rhs)
-      : res_(rhs.res_),
-        pos_(rhs.pos_),
-        numTuples_(rhs.numTuples_),
-        refCount_(rhs.refCount_)
-    {
-        (*refCount_)++;
-    }
-
-    ResultSet& operator=(const ResultSet& rhs)
-    {
-        if (this == &rhs)
-        {
-            return *this;
-        }
-
-        if (--(refCount_) == 0)
-        {
-            close();
-
-            delete refCount_;
-            refCount_ = 0;
-        }
-
-        res_ = rhs.res_;
-        pos_ = rhs.pos_;
-        numTuples_ = rhs.numTuples_;
-        refCount_ = rhs.refCount_;
-        (*refCount_)++;
-        return *this;
     }
 
     virtual void close()
@@ -96,13 +63,7 @@ public:
 
     virtual ~ResultSet()
     {
-        if (--(*refCount_) == 0)
-        {
-            PQclear(res_);
-
-            delete refCount_;
-            refCount_ = 0;
-        }
+        PQclear(res_);
     }
 
     virtual int getNumFields() const
@@ -184,7 +145,6 @@ private:
     PGresult* res_;
     int pos_;
     int numTuples_;
-    int *refCount_;
 };
 
 #endif // POSTGIS_RESULTSET_HPP

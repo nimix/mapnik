@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,19 +23,24 @@
 #ifndef DBFFILE_HPP
 #define DBFFILE_HPP
 
+// mapnik
 #include <mapnik/feature.hpp>
-// boost
-#include <boost/utility.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/unicode.hpp>
+
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
+#include <mapnik/mapped_memory_cache.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/interprocess/streams/bufferstream.hpp>
+#pragma GCC diagnostic pop
+#endif
 
 // stl
 #include <vector>
 #include <string>
 #include <cassert>
 #include <fstream>
-
-using mapnik::transcoder;
-using mapnik::Feature;
 
 struct field_descriptor
 {
@@ -48,22 +53,23 @@ struct field_descriptor
 };
 
 
-class dbf_file : private boost::noncopyable
+class dbf_file : private mapnik::util::noncopyable
 {
 private:
     int num_records_;
     int num_fields_;
     std::size_t record_length_;
     std::vector<field_descriptor> fields_;
-#ifdef SHAPE_MEMORY_MAPPED_FILE
+#if defined(MAPNIK_MEMORY_MAPPED_FILE)
     boost::interprocess::ibufferstream file_;
+    mapnik::mapped_region_ptr mapped_region_;
 #else
     std::ifstream file_;
 #endif
     char* record_;
 public:
     dbf_file();
-    dbf_file(const std::string& file_name);
+    dbf_file(std::string const& file_name);
     ~dbf_file();
     bool is_open();
     int num_records() const;
@@ -71,7 +77,7 @@ public:
     field_descriptor const& descriptor(int col) const;
     void move_to(int index);
     std::string string_value(int col) const;
-    void add_attribute(int col, transcoder const& tr, Feature & f) const throw();
+    void add_attribute(int col, mapnik::transcoder const& tr, mapnik::feature_impl & f) const;
 private:
     void read_header();
     int read_short();

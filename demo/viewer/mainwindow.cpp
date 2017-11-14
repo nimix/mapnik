@@ -1,6 +1,6 @@
 /* This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * Mapnik is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,10 +14,9 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-//$Id$
 
 // stl
 #include <iostream>
@@ -33,13 +32,18 @@
 #include <QSlider>
 #include <QComboBox>
 #include <QDoubleSpinBox>
-
+#include <QFileDialog>
+#include <QMenu>
+#include <QMenuBar>
+#include <QToolBar>
 // mapnik
 
 #ifndef Q_MOC_RUN // QT moc chokes on BOOST_JOIN
-#include <mapnik/config_error.hpp>
+//#include <mapnik/config_error.hpp>
 #include <mapnik/load_map.hpp>
 #include <mapnik/save_map.hpp>
+#include <mapnik/projection.hpp>
+#include <mapnik/util/timer.hpp>
 #endif
 
 // qt
@@ -49,6 +53,9 @@
 #include "layerwidget.hpp"
 #include "layerdelegate.hpp"
 #include "about_dialog.hpp"
+
+// boost
+#include <boost/algorithm/string.hpp>
 
 MainWindow::MainWindow()
     : filename_(),
@@ -179,16 +186,17 @@ void MainWindow::save()
 
 void MainWindow::load_map_file(QString const& filename)
 {
-    std::cout<<"loading "<< filename.toStdString() << std::endl;
+    std::cout << "loading "<< filename.toStdString() << std::endl;
     unsigned width = mapWidget_->width();
     unsigned height = mapWidget_->height();
-    boost::shared_ptr<mapnik::Map> map(new mapnik::Map(width,height));
+    std::shared_ptr<mapnik::Map> map(new mapnik::Map(width,height));
     mapWidget_->setMap(map);
     try
     {
+        mapnik::auto_cpu_timer t(std::clog, "loading map took: ");
         mapnik::load_map(*map,filename.toStdString());
     }
-    catch (mapnik::config_error & ex)
+    catch (std::exception const& ex)
     {
         std::cout << ex.what() << "\n";
     }
@@ -409,7 +417,7 @@ void MainWindow::set_default_extent(double x0,double y0, double x1, double y1)
 {
     try
     {
-        boost::shared_ptr<mapnik::Map> map_ptr = mapWidget_->getMap();
+        std::shared_ptr<mapnik::Map> map_ptr = mapWidget_->getMap();
         if (map_ptr)
         {
             mapnik::projection prj(map_ptr->srs());
@@ -430,11 +438,16 @@ void MainWindow::set_scaling_factor(double scaling_factor)
 
 void MainWindow::zoom_all()
 {
-    boost::shared_ptr<mapnik::Map> map_ptr = mapWidget_->getMap();
+    std::shared_ptr<mapnik::Map> map_ptr = mapWidget_->getMap();
     if (map_ptr)
     {
         map_ptr->zoom_all();
         mapnik::box2d<double> const& ext = map_ptr->get_current_extent();
         mapWidget_->zoomToBox(ext);
     }
+}
+
+std::shared_ptr<mapnik::Map> MainWindow::get_map()
+{
+    return mapWidget_->getMap();
 }

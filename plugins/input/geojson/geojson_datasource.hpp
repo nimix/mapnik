@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,55 +28,82 @@
 #include <mapnik/params.hpp>
 #include <mapnik/query.hpp>
 #include <mapnik/feature.hpp>
-#include <mapnik/box2d.hpp>
+#include <mapnik/geometry/box2d.hpp>
 #include <mapnik/coord.hpp>
 #include <mapnik/feature_layer_desc.hpp>
+#include <mapnik/unicode.hpp>
 
-// boost
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/optional.hpp>
-#include <boost/shared_ptr.hpp>
-#include <boost/geometry/geometries/box.hpp>
-#include <boost/geometry/geometries/point_xy.hpp>
-#include <boost/geometry/algorithms/area.hpp>
-#include <boost/geometry/extensions/index/rtree/rtree.hpp>
-#include <boost/geometry/geometries/geometries.hpp>
-#include <boost/geometry/extensions/index/rtree/rtree.hpp>
+#include <boost/version.hpp>
+#include <boost/geometry/index/rtree.hpp>
+#pragma GCC diagnostic pop
 
 // stl
+#include <memory>
 #include <vector>
 #include <string>
 #include <map>
 #include <deque>
+#include <functional>
+
+template <std::size_t Max, std::size_t Min>
+struct geojson_linear : boost::geometry::index::linear<Max,Min> {};
+
+namespace boost { namespace geometry { namespace index { namespace detail { namespace rtree {
+
+template <std::size_t Max, std::size_t Min>
+struct options_type<geojson_linear<Max,Min> >
+{
+    using type = options<geojson_linear<Max, Min>,
+                         insert_default_tag,
+                         choose_by_content_diff_tag,
+                         split_default_tag,
+                         linear_tag,
+#if BOOST_VERSION >= 105700
+                         node_variant_static_tag>;
+#else
+                         node_s_mem_static_tag>;
+
+#endif
+};
+
+}}}}}
 
 class geojson_datasource : public mapnik::datasource
 {
 public:
-    typedef boost::geometry::model::d2::point_xy<double> point_type;
-    typedef boost::geometry::model::box<point_type> box_type;
-    typedef boost::geometry::index::rtree<box_type,std::size_t> spatial_index_type;
-    
+    using box_type = mapnik::box2d<double>;
+    using item_type = std::pair<box_type, std::pair<std::uint64_t, std::uint64_t> >;
+    using spatial_index_type = boost::geometry::index::rtree<item_type,geojson_linear<16,4> >;
     // constructor
-    geojson_datasource(mapnik::parameters const& params, bool bind=true);
+    geojson_datasource(mapnik::parameters const& params);
     virtual ~geojson_datasource ();
     mapnik::datasource::datasource_t type() const;
     static const char * name();
     mapnik::featureset_ptr features(mapnik::query const& q) const;
-    mapnik::featureset_ptr features_at_point(mapnik::coord2d const& pt) const;
+    mapnik::featureset_ptr features_at_point(mapnik::coord2d const& pt, double tol = 0) const;
     mapnik::box2d<double> envelope() const;
     mapnik::layer_descriptor get_descriptor() const;
-    boost::optional<mapnik::datasource::geometry_t> get_geometry_type() const;
-    void bind() const;
+    boost::optional<mapnik::datasource_geometry_t> get_geometry_type() const;
+    template <typename Iterator>
+    void parse_geojson(Iterator start, Iterator end);
+    template <typename Iterator>
+    void initialise_index(Iterator start, Iterator end);
+    void initialise_disk_index(std::string const& filename);
 private:
+    void initialise_descriptor(mapnik::feature_ptr const&);
     mapnik::datasource::datasource_t type_;
-    mutable std::map<std::string, mapnik::parameters> statistics_;
-    mutable mapnik::layer_descriptor desc_;
-    mutable std::string file_;
-    mutable mapnik::box2d<double> extent_;
-    boost::shared_ptr<mapnik::transcoder> tr_;
-    mutable std::vector<mapnik::feature_ptr> features_;
-    mutable spatial_index_type tree_;
-    mutable std::deque<std::size_t> index_array_;
+    mapnik::layer_descriptor desc_;
+    std::string filename_;
+    bool from_inline_string_;
+    mapnik::box2d<double> extent_;
+    std::vector<mapnik::feature_ptr> features_;
+    std::unique_ptr<spatial_index_type> tree_;
+    bool cache_features_ = true;
+    bool has_disk_index_ = false;
+    const std::size_t num_features_to_query_;
 };
 
-
-#endif // FILE_DATASOURCE_HPP
+#endif // GEOJSON_DATASOURCE_HPP

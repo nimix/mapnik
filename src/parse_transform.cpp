@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,48 +20,46 @@
  *
  *****************************************************************************/
 
-#include <mapnik/parse_transform.hpp>
-#include <mapnik/transform_expression_grammar.hpp>
-#include <mapnik/transform_processor.hpp>
-#include <mapnik/debug.hpp>
-
-#include <boost/make_shared.hpp>
+#include <mapnik/transform/parse_transform.hpp>
+#include <mapnik/transform/transform_expression_grammar_x3.hpp>
+#include <mapnik/expression_grammar_x3_config.hpp> // transcoder_tag
+#include <mapnik/config_error.hpp>
+// stl
+#include <string>
+#include <stdexcept>
 
 namespace mapnik {
 
-transform_list_ptr parse_transform(std::string const& str)
-{
-    return parse_transform(str, "utf-8");
-}
-
 transform_list_ptr parse_transform(std::string const& str, std::string const& encoding)
 {
-    transform_list_ptr tl = boost::make_shared<transform_list>();
-    transcoder tc(encoding);
-    expression_grammar<std::string::const_iterator> ge(tc);
-    transform_expression_grammar__string gte(ge);
-
-    if (!parse_transform(*tl, str, gte))
-    {
-        tl.reset();
-    }
-    return tl;
-}
-
-bool parse_transform(transform_list& transform,
-                     std::string const& str,
-                     transform_expression_grammar__string const& g)
-{
+    using boost::spirit::x3::ascii::space;
+    transform_list_ptr trans_list = std::make_shared<transform_list>();
     std::string::const_iterator itr = str.begin();
     std::string::const_iterator end = str.end();
-    bool r = qi::phrase_parse(itr, end, g, space_type(), transform);
+    mapnik::transcoder const tr(encoding);
+    auto const parser = boost::spirit::x3::with<mapnik::grammar::transcoder_tag>(std::ref(tr))
+        [
+            mapnik::transform_expression_grammar()
+        ];
+    bool status = false;
+    try
+    {
+        status = boost::spirit::x3::phrase_parse(itr, end, parser, space, *trans_list);
+    }
+    catch (boost::spirit::x3::expectation_failure<std::string::const_iterator> const& ex)
+    {
+        throw config_error("Failed to parse transform expression: \"" + str + "\"");
+    }
 
-    #ifdef MAPNIK_LOG
-    MAPNIK_LOG_DEBUG(load_map) << "map_parser: Parsed transform [ "
-        << transform_processor_type::to_string(transform) << " ]";
-    #endif
-
-    return (r && itr==end);
+    if (status && itr == end)
+    {
+        return trans_list;
+    }
+    else
+    {
+        throw std::runtime_error("Failed to parse transform: \"" + str + "\"");
+    }
 }
+
 
 } // namespace mapnik

@@ -1,6 +1,6 @@
 /* This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * Mapnik is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,16 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-//$Id$
 
 #ifndef MAINWINDOW_HPP
 #define MAINWINDOW_HPP
 
 #include <QMainWindow>
-#include <QPrinter>
 #include <QList>
 #include <QActionGroup>
 #include <QStatusBar>
@@ -48,6 +46,8 @@ class MainWindow : public QMainWindow
     virtual ~MainWindow();
     void set_default_extent(double x0,double y0,double x1, double y1);
     void set_scaling_factor(double scaling_factor);
+public :
+    std::shared_ptr<mapnik::Map> get_map();
 protected:
     void closeEvent(QCloseEvent* event);
 public slots:
@@ -72,14 +72,12 @@ private:
     void createContextMenu();
     void load_map_file(QString const& filename);
 
-
     QString currentPath;
     QString filename_;
     QAbstractItemModel *model;
     LayerTab  *layerTab_;
     StyleTab * styleTab_;
     MapWidget * mapWidget_;
-    QPrinter printer;
     //actions
     QList<QAction *> exportAsActs;
     QActionGroup *toolsGroup;

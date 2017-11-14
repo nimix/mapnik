@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,356 +21,131 @@
  *****************************************************************************/
 
 // mapnik
-#include <mapnik/debug.hpp>
-#include <mapnik/graphics.hpp>
-#include <mapnik/geom_util.hpp>
+#include <mapnik/agg_helpers.hpp>
 #include <mapnik/agg_renderer.hpp>
 #include <mapnik/agg_rasterizer.hpp>
-#include <mapnik/expression_evaluator.hpp>
-#include <mapnik/vertex_converters.hpp>
-#include <mapnik/marker.hpp>
-#include <mapnik/marker_cache.hpp>
-#include <mapnik/marker_helpers.hpp>
-#include <mapnik/svg/svg_renderer.hpp>
+#include <mapnik/agg_render_marker.hpp>
+#include <mapnik/svg/svg_renderer_agg.hpp>
+#include <mapnik/svg/svg_storage.hpp>
 #include <mapnik/svg/svg_path_adapter.hpp>
-#include <mapnik/markers_placement.hpp>
-#include <mapnik/markers_symbolizer.hpp>
+#include <mapnik/svg/svg_path_attributes.hpp>
+#include <mapnik/symbolizer.hpp>
+#include <mapnik/renderer_common/clipping_extent.hpp>
+#include <mapnik/renderer_common/render_markers_symbolizer.hpp>
 
-// agg
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_basics.h"
+#include "agg_renderer_base.h"
+#include "agg_renderer_scanline.h"
 #include "agg_rendering_buffer.h"
 #include "agg_pixfmt_rgba.h"
+#include "agg_color_rgba.h"
 #include "agg_rasterizer_scanline_aa.h"
 #include "agg_scanline_u.h"
 #include "agg_path_storage.h"
-#include "agg_conv_clip_polyline.h"
 #include "agg_conv_transform.h"
-#include "agg_image_filters.h"
-#include "agg_trans_bilinear.h"
-#include "agg_span_allocator.h"
-#include "agg_image_accessors.h"
-#include "agg_span_image_filter_rgba.h"
-// boost
-#include <boost/optional.hpp>
+#pragma GCC diagnostic pop
 
 namespace mapnik {
 
-template <typename BufferType, typename SvgRenderer, typename Rasterizer, typename Detector>
-struct vector_markers_rasterizer_dispatch
-{
-    typedef agg::rgba8 color_type;
-    typedef agg::order_rgba order_type;
-    typedef agg::pixel32_type pixel_type;
-    typedef agg::comp_op_adaptor_rgba_pre<color_type, order_type> blender_type; // comp blender
-    typedef agg::pixfmt_custom_blend_rgba<blender_type, agg::rendering_buffer> pixfmt_comp_type;
-    typedef agg::renderer_base<pixfmt_comp_type> renderer_base;
-    typedef agg::renderer_scanline_aa_solid<renderer_base> renderer_type;
+namespace detail {
 
-    vector_markers_rasterizer_dispatch(BufferType & image_buffer,
-                                SvgRenderer & svg_renderer,
-                                Rasterizer & ras,
-                                box2d<double> const& bbox,
-                                agg::trans_affine const& marker_trans,
-                                markers_symbolizer const& sym,
-                                Detector & detector,
-                                double scale_factor)
-        : buf_(image_buffer.raw_data(), image_buffer.width(), image_buffer.height(), image_buffer.width() * 4),
+template <typename SvgRenderer, typename BufferType, typename RasterizerType>
+struct agg_markers_renderer_context : markers_renderer_context
+{
+    using renderer_base = typename SvgRenderer::renderer_base;
+    using vertex_source_type = typename SvgRenderer::vertex_source_type;
+    using pixfmt_type = typename renderer_base::pixfmt_type;
+
+    agg_markers_renderer_context(symbolizer_base const& sym,
+                                 feature_impl const& feature,
+                                 attributes const& vars,
+                                 BufferType & buf,
+                                 RasterizerType & ras)
+      : buf_(buf),
         pixf_(buf_),
         renb_(pixf_),
-        svg_renderer_(svg_renderer),
-        ras_(ras),
-        bbox_(bbox),
-        marker_trans_(marker_trans),
-        sym_(sym),
-        detector_(detector),
-        scale_factor_(scale_factor)
+        ras_(ras)
     {
-        pixf_.comp_op(static_cast<agg::comp_op_e>(sym_.comp_op()));
+        auto comp_op = get<composite_mode_e, keys::comp_op>(sym, feature, vars);
+        pixf_.comp_op(static_cast<agg::comp_op_e>(comp_op));
     }
 
-    template <typename T>
-    void add_path(T & path)
+    virtual void render_marker(svg_path_ptr const& src,
+                               svg_path_adapter & path,
+                               svg_attribute_type const& attrs,
+                               markers_dispatch_params const& params,
+                               agg::trans_affine const& marker_tr)
     {
-        marker_placement_e placement_method = sym_.get_marker_placement();
-
-        if (placement_method == MARKER_POINT_PLACEMENT)
-        {
-            double x,y;
-            path.rewind(0);
-            label::interior_position(path, x, y);
-            agg::trans_affine matrix = marker_trans_;
-            matrix.translate(x,y);
-            box2d<double> transformed_bbox = bbox_ * matrix;
-
-            if (sym_.get_allow_overlap() ||
-                detector_.has_placement(transformed_bbox))
-            {
-                svg_renderer_.render(ras_, sl_, renb_, matrix, sym_.get_opacity(), bbox_);
-
-                if (!sym_.get_ignore_placement())
-                    detector_.insert(transformed_bbox);
-            }
-        }
-        else
-        {
-            markers_placement<T, label_collision_detector4> placement(path, bbox_, marker_trans_, detector_,
-                                                                      sym_.get_spacing() * scale_factor_,
-                                                                      sym_.get_max_error(),
-                                                                      sym_.get_allow_overlap());
-            double x, y, angle;
-            while (placement.get_point(x, y, angle))
-            {
-                agg::trans_affine matrix = marker_trans_;
-                matrix.rotate(angle);
-                matrix.translate(x, y);
-                svg_renderer_.render(ras_, sl_, renb_, matrix, sym_.get_opacity(), bbox_);
-            }
-        }
+        SvgRenderer svg_renderer(path, attrs);
+        render_vector_marker(svg_renderer, ras_, renb_, src->bounding_box(),
+                             marker_tr, params.opacity, params.snap_to_pixels);
     }
+
+
+    virtual void render_marker(image_rgba8 const& src,
+                               markers_dispatch_params const& params,
+                               agg::trans_affine const& marker_tr)
+    {
+        // In the long term this should be a visitor pattern based on the type of
+        // render src provided that converts the destination pixel type required.
+        render_raster_marker(renb_, ras_, src, marker_tr, params.opacity,
+                             params.scale_factor, params.snap_to_pixels);
+    }
+
 private:
-    agg::scanline_u8 sl_;
-    agg::rendering_buffer buf_;
-    pixfmt_comp_type pixf_;
+    BufferType & buf_;
+    pixfmt_type pixf_;
     renderer_base renb_;
-    SvgRenderer & svg_renderer_;
-    Rasterizer & ras_;
-    box2d<double> const& bbox_;
-    agg::trans_affine const& marker_trans_;
-    markers_symbolizer const& sym_;
-    Detector & detector_;
-    double scale_factor_;
+    RasterizerType & ras_;
 };
 
-template <typename Rasterizer, typename RendererBuffer>
-void render_raster_marker(Rasterizer & ras, RendererBuffer & renb,
-                          agg::scanline_u8 & sl, image_data_32 const& src,
-                          agg::trans_affine const& marker_tr, double opacity)
-{
+} // namespace detail
 
-    double width  = src.width();
-    double height = src.height();
-    double p[8];
-    p[0] = 0;     p[1] = 0;
-    p[2] = width; p[3] = 0;
-    p[4] = width; p[5] = height;
-    p[6] = 0;     p[7] = height;
-
-    marker_tr.transform(&p[0], &p[1]);
-    marker_tr.transform(&p[2], &p[3]);
-    marker_tr.transform(&p[4], &p[5]);
-    marker_tr.transform(&p[6], &p[7]);
-
-    ras.move_to_d(p[0],p[1]);
-    ras.line_to_d(p[2],p[3]);
-    ras.line_to_d(p[4],p[5]);
-    ras.line_to_d(p[6],p[7]);
-
-    typedef agg::rgba8 color_type;
-    agg::span_allocator<color_type> sa;
-    agg::image_filter_bilinear filter_kernel;
-    agg::image_filter_lut filter(filter_kernel, false);
-
-    agg::rendering_buffer marker_buf((unsigned char *)src.getBytes(),
-                                     src.width(),
-                                     src.height(),
-                                     src.width()*4);
-    agg::pixfmt_rgba32_pre pixf(marker_buf);
-
-    typedef agg::image_accessor_clone<agg::pixfmt_rgba32_pre> img_accessor_type;
-    typedef agg::span_interpolator_linear<agg::trans_affine> interpolator_type;
-    typedef agg::span_image_filter_rgba_2x2<img_accessor_type,
-                                            interpolator_type> span_gen_type;
-    img_accessor_type ia(pixf);
-    interpolator_type interpolator(agg::trans_affine(p, 0, 0, width, height) );
-    span_gen_type sg(ia, interpolator, filter);
-    agg::render_scanlines_aa(ras, sl, renb, sa, sg);
-}
-
-template <typename BufferType, typename Rasterizer, typename Detector>
-struct raster_markers_rasterizer_dispatch
-{
-    typedef agg::rgba8 color_type;
-    typedef agg::order_rgba order_type;
-    typedef agg::pixel32_type pixel_type;
-    typedef agg::comp_op_adaptor_rgba_pre<color_type, order_type> blender_type; // comp blender
-    typedef agg::pixfmt_custom_blend_rgba<blender_type, agg::rendering_buffer> pixfmt_comp_type;
-    typedef agg::renderer_base<pixfmt_comp_type> renderer_base;
-    typedef agg::renderer_scanline_aa_solid<renderer_base> renderer_type;
-
-    raster_markers_rasterizer_dispatch(BufferType & image_buffer,
-                                       Rasterizer & ras,
-                                       image_data_32 const& src,
-                                       agg::trans_affine const& marker_trans,
-                                       markers_symbolizer const& sym,
-                                       Detector & detector,
-                                       double scale_factor)
-        : buf_(image_buffer.raw_data(), image_buffer.width(), image_buffer.height(), image_buffer.width() * 4),
-        pixf_(buf_),
-        renb_(pixf_),
-        ras_(ras),
-        src_(src),
-        marker_trans_(marker_trans),
-        sym_(sym),
-        detector_(detector),
-        scale_factor_(scale_factor)
-    {
-        pixf_.comp_op(static_cast<agg::comp_op_e>(sym_.comp_op()));
-    }
-
-    template <typename T>
-    void add_path(T & path)
-    {
-        marker_placement_e placement_method = sym_.get_marker_placement();
-        box2d<double> bbox_(0,0, src_.width(),src_.height());
-
-        if (placement_method == MARKER_POINT_PLACEMENT)
-        {
-            double x,y;
-            path.rewind(0);
-            label::interior_position(path, x, y);
-            agg::trans_affine matrix = marker_trans_;
-            matrix.translate(x,y);
-            box2d<double> transformed_bbox = bbox_ * matrix;
-
-            if (sym_.get_allow_overlap() ||
-                detector_.has_placement(transformed_bbox))
-            {
-
-                render_raster_marker(ras_, renb_, sl_, src_,
-                                     matrix, sym_.get_opacity());
-                if (!sym_.get_ignore_placement())
-                    detector_.insert(transformed_bbox);
-            }
-        }
-        else
-        {
-            markers_placement<T, label_collision_detector4> placement(path, bbox_, marker_trans_, detector_,
-                                                                      sym_.get_spacing() * scale_factor_,
-                                                                      sym_.get_max_error(),
-                                                                      sym_.get_allow_overlap());
-            double x, y, angle;
-            while (placement.get_point(x, y, angle))
-            {
-                agg::trans_affine matrix = marker_trans_;
-                matrix.rotate(angle);
-                matrix.translate(x,y);
-                render_raster_marker(ras_, renb_, sl_, src_,
-                                     matrix, sym_.get_opacity());
-            }
-        }
-    }
-private:
-    agg::scanline_u8 sl_;
-    agg::rendering_buffer buf_;
-    pixfmt_comp_type pixf_;
-    renderer_base renb_;
-    Rasterizer & ras_;
-    image_data_32 const& src_;
-    agg::trans_affine const& marker_trans_;
-    markers_symbolizer const& sym_;
-    Detector & detector_;
-    double scale_factor_;
-};
-
-
-template <typename T>
-void agg_renderer<T>::process(markers_symbolizer const& sym,
+template <typename T0, typename T1>
+void agg_renderer<T0,T1>::process(markers_symbolizer const& sym,
                               feature_impl & feature,
                               proj_transform const& prj_trans)
 {
-    typedef agg::rgba8 color_type;
-    typedef agg::order_rgba order_type;
-    typedef agg::pixel32_type pixel_type;
-    typedef agg::comp_op_adaptor_rgba_pre<color_type, order_type> blender_type; // comp blender
-    typedef agg::pixfmt_custom_blend_rgba<blender_type, agg::rendering_buffer> pixfmt_comp_type;
-    typedef agg::renderer_base<pixfmt_comp_type> renderer_base;
-    typedef agg::renderer_scanline_aa_solid<renderer_base> renderer_type;
-    typedef label_collision_detector4 detector_type;
-    typedef boost::mpl::vector<clip_line_tag,transform_tag,smooth_tag> conv_types;
+    using namespace mapnik::svg;
+    using color_type = agg::rgba8;
+    using order_type = agg::order_rgba;
+    using blender_type = agg::comp_op_adaptor_rgba_pre<color_type, order_type>; // comp blender
+    using buf_type = agg::rendering_buffer;
+    using pixfmt_comp_type = agg::pixfmt_custom_blend_rgba<blender_type, buf_type>;
+    using renderer_base = agg::renderer_base<pixfmt_comp_type>;
+    using renderer_type = agg::renderer_scanline_aa_solid<renderer_base>;
+    using svg_renderer_type = svg_renderer_agg<svg_path_adapter,
+                                               svg_attribute_type,
+                                               renderer_type,
+                                               pixfmt_comp_type>;
 
-    std::string filename = path_processor_type::evaluate(*sym.get_filename(), feature);
+    ras_ptr->reset();
 
-    if (!filename.empty())
+    double gamma = get<value_double, keys::gamma>(sym, feature, common_.vars_);
+    gamma_method_enum gamma_method = get<gamma_method_enum, keys::gamma_method>(sym, feature, common_.vars_);
+    if (gamma != gamma_ || gamma_method != gamma_method_)
     {
-        boost::optional<marker_ptr> mark = mapnik::marker_cache::instance()->find(filename, true);
-        if (mark && *mark)
-        {
-            ras_ptr->reset();
-            ras_ptr->gamma(agg::gamma_power());
-
-            agg::trans_affine geom_tr;
-            evaluate_transform(geom_tr, feature, sym.get_transform());
-
-            box2d<double> const& bbox = (*mark)->bounding_box();
-            agg::trans_affine tr;
-            setup_label_transform(tr, bbox, feature, sym);
-            tr = agg::trans_affine_scaling(scale_factor_) * tr;
-            coord2d center = bbox.center();
-            agg::trans_affine_translation recenter(-center.x, -center.y);
-            agg::trans_affine marker_trans = recenter * tr;
-
-            if ((*mark)->is_vector())
-            {
-                using namespace mapnik::svg;
-                boost::optional<path_ptr> marker = (*mark)->get_vector_data();
-
-
-                vertex_stl_adapter<svg_path_storage> stl_storage((*marker)->source());
-                svg_path_adapter svg_path(stl_storage);
-
-                agg::pod_bvector<path_attributes> attributes;
-                bool result = push_explicit_style( (*marker)->attributes(), attributes, sym);
-
-                typedef svg_renderer<svg_path_adapter,
-                                     agg::pod_bvector<path_attributes>,
-                                     renderer_type,
-                                     agg::pixfmt_rgba32 > svg_renderer_type;
-                typedef vector_markers_rasterizer_dispatch<buffer_type, svg_renderer_type, rasterizer, detector_type> dispatch_type;
-
-
-                svg_renderer_type svg_renderer(svg_path, result ? attributes : (*marker)->attributes());
-
-                dispatch_type rasterizer_dispatch(*current_buffer_,svg_renderer,*ras_ptr,
-                                                  bbox, marker_trans, sym, *detector_, scale_factor_);
-
-
-                vertex_converter<box2d<double>, dispatch_type, markers_symbolizer,
-                                 CoordTransform, proj_transform, agg::trans_affine, conv_types>
-                    converter(query_extent_* 1.1,rasterizer_dispatch, sym,t_,prj_trans,tr,scale_factor_);
-
-                if (sym.clip()) converter.template set<clip_line_tag>(); //optional clip (default: true)
-                converter.template set<transform_tag>(); //always transform
-                if (sym.smooth() > 0.0) converter.template set<smooth_tag>(); // optional smooth converter
-
-                BOOST_FOREACH(geometry_type & geom, feature.paths())
-                {
-                    converter.apply(geom);
-                }
-            }
-            else // raster markers
-            {
-                boost::optional<mapnik::image_ptr> marker = (*mark)->get_bitmap_data();
-                typedef raster_markers_rasterizer_dispatch<buffer_type,rasterizer, detector_type> dispatch_type;
-                dispatch_type rasterizer_dispatch(*current_buffer_,*ras_ptr, **marker,
-                                                  marker_trans, sym, *detector_, scale_factor_);
-                vertex_converter<box2d<double>, dispatch_type, markers_symbolizer,
-                                 CoordTransform, proj_transform, agg::trans_affine, conv_types>
-                    converter(query_extent_* 1.1, rasterizer_dispatch, sym,t_,prj_trans,tr,scale_factor_);
-
-                if (sym.clip()) converter.template set<clip_line_tag>(); //optional clip (default: true)
-                converter.template set<transform_tag>(); //always transform
-                if (sym.smooth() > 0.0) converter.template set<smooth_tag>(); // optional smooth converter
-
-                BOOST_FOREACH(geometry_type & geom, feature.paths())
-                {
-                    converter.apply(geom);
-                }
-            }
-        }
+        set_gamma_method(ras_ptr, gamma, gamma_method);
+        gamma_method_ = gamma_method;
+        gamma_ = gamma;
     }
+
+    buffer_type & current_buffer = buffers_.top().get();
+    buf_type render_buffer(current_buffer.bytes(), current_buffer.width(), current_buffer.height(), current_buffer.row_size());
+    box2d<double> clip_box = clipping_extent(common_);
+
+    using renderer_context_type = detail::agg_markers_renderer_context<svg_renderer_type,
+                                                              buf_type,
+                                                              rasterizer>;
+    renderer_context_type renderer_context(sym, feature, common_.vars_, render_buffer, *ras_ptr);
+
+    render_markers_symbolizer(
+        sym, feature, prj_trans, common_, clip_box, renderer_context);
 }
 
-template void agg_renderer<image_32>::process(markers_symbolizer const&,
+template void agg_renderer<image_rgba8>::process(markers_symbolizer const&,
                                               mapnik::feature_impl &,
                                               proj_transform const&);
-}
+} // namespace mapnik

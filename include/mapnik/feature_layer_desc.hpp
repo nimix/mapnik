@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,11 +25,12 @@
 
 // mapnik
 #include <mapnik/attribute_descriptor.hpp>
+#include <mapnik/params.hpp>
 
 // stl
-#include <string>
+#include <iosfwd>
 #include <vector>
-#include <iostream>
+#include <algorithm>
 
 namespace mapnik
 {
@@ -40,12 +41,14 @@ public:
     layer_descriptor(std::string const& name, std::string const& encoding)
         : name_(name),
           encoding_(encoding),
-          desc_ar_() {}
+          descriptors_(),
+          extra_params_() {}
 
     layer_descriptor(layer_descriptor const& other)
         : name_(other.name_),
           encoding_(other.encoding_),
-          desc_ar_(other.desc_ar_) {}
+          descriptors_(other.descriptors_),
+          extra_params_(other.extra_params_) {}
 
     void set_name(std::string const& name)
     {
@@ -69,40 +72,50 @@ public:
 
     void add_descriptor(attribute_descriptor const& desc)
     {
-        desc_ar_.push_back(desc);
+        descriptors_.push_back(desc);
     }
 
     std::vector<attribute_descriptor> const& get_descriptors() const
     {
-        return desc_ar_;
+        return descriptors_;
     }
 
     std::vector<attribute_descriptor>& get_descriptors()
     {
-        return desc_ar_;
+        return descriptors_;
     }
 
+    parameters const& get_extra_parameters() const
+    {
+        return extra_params_;
+    }
+
+    parameters& get_extra_parameters()
+    {
+        return extra_params_;
+    }
+
+    bool has_name(std::string const& name) const
+    {
+        auto result = std::find_if(std::begin(descriptors_), std::end(descriptors_),
+                                [&name](attribute_descriptor const& desc) { return name == desc.get_name();});
+        return result != std::end(descriptors_);
+    }
+    void order_by_name()
+    {
+        std::sort(std::begin(descriptors_), std::end(descriptors_),
+                  [](attribute_descriptor const& d0, attribute_descriptor const& d1)
+                  {
+                      return d0.get_name() < d1.get_name();
+                  });
+    }
 private:
     std::string name_;
     std::string encoding_;
-    std::vector<attribute_descriptor> desc_ar_;
+    std::vector<attribute_descriptor> descriptors_;
+    parameters extra_params_;
 };
 
-template <typename charT,typename traits>
-inline std::basic_ostream<charT,traits>&
-operator << (std::basic_ostream<charT,traits>& out,
-             layer_descriptor const& ld)
-{
-    out << "name: " << ld.get_name() << "\n";
-    out << "encoding: " << ld.get_encoding() << "\n";
-    std::vector<attribute_descriptor> const& desc_ar = ld.get_descriptors();
-    std::vector<attribute_descriptor>::const_iterator pos = desc_ar.begin();
-    while (pos != desc_ar.end())
-    {
-        out << *pos++ << "\n";
-    }
-    return out;
-}
 }
 
 #endif // MAPNIK_FEATURE_LAYER_DESC_HPP

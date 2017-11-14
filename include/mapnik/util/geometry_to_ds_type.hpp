@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2012 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,45 +20,76 @@
  *
  *****************************************************************************/
 
-#ifndef MAPNIK_GEOMETRY_TO_DS_TYPE
-#define MAPNIK_GEOMETRY_TO_DS_TYPE
+#ifndef MAPNIK_GEOMETRY_TO_DS_TYPE_HPP
+#define MAPNIK_GEOMETRY_TO_DS_TYPE_HPP
 
 // mapnik
 #include <mapnik/global.hpp>
 #include <mapnik/geometry.hpp>
-#include <mapnik/datasource.hpp>
+#include <mapnik/datasource_geometry_type.hpp>
+#include <mapnik/util/variant.hpp>
 
-// boost
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/optional.hpp>
+#include <boost/fusion/include/at.hpp>
+#include <boost/fusion/include/vector.hpp>
+#pragma GCC diagnostic pop
 
 namespace mapnik { namespace util {
 
-    void to_ds_type(mapnik::geometry_container const& paths,
-                    boost::optional<mapnik::datasource::geometry_t> & result)
+namespace detail {
+
+struct datasource_geometry_type
+{
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::geometry_empty const&) const
     {
-        if (paths.size() == 1)
-        {
-            result.reset(static_cast<mapnik::datasource::geometry_t>(paths.front().type()));
-        }
-        else if (paths.size() > 1)
-        {
-            int multi_type = 0;
-            geometry_container::const_iterator itr = paths.begin();
-            geometry_container::const_iterator end = paths.end();
-            for ( ; itr!=end; ++itr)
-            {
-                int type = static_cast<int>(itr->type());
-                if (multi_type > 0 && multi_type != type)
-                {
-                    result.reset(datasource::Collection);
-                }
-                multi_type = type;
-                result.reset(static_cast<mapnik::datasource::geometry_t>(type));
-            }
-        }
+        return mapnik::datasource_geometry_t::Unknown;
     }
 
-    }}
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::point<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::Point;
+    }
+
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::line_string<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::LineString;
+    }
+
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::polygon<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::Polygon;
+    }
+
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::multi_point<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::Point;
+    }
+
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::multi_line_string<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::LineString;
+    }
+
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::multi_polygon<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::Polygon;
+    }
+
+    mapnik::datasource_geometry_t operator () (mapnik::geometry::geometry_collection<double> const&) const
+    {
+        return mapnik::datasource_geometry_t::Collection;
+    }
+};
+} // detail
+
+static inline mapnik::datasource_geometry_t to_ds_type(mapnik::geometry::geometry<double> const& geom)
+{
+    return util::apply_visitor(detail::datasource_geometry_type(), geom);
+}
+
+}}
 
 
-#endif // MAPNIK_GEOMETRY_TO_DS_TYPE
+#endif // MAPNIK_GEOMETRY_TO_DS_TYPE_HPP

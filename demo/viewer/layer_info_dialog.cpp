@@ -1,6 +1,6 @@
 /* This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * Mapnik is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -14,14 +14,16 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-//$Id$
 
 #include "layer_info_dialog.hpp"
 
 // mapnik
+#include <mapnik/datasource.hpp>
+#include <mapnik/params.hpp>
+#include <mapnik/params_impl.hpp>
 #include <mapnik/layer.hpp>
 
 
@@ -52,7 +54,7 @@ layer_info_dialog::layer_info_dialog(mapnik::layer& lay, QWidget *parent)
         for (pos = ps.begin();pos != ps.end();++pos)
         {
             boost::optional<std::string> result;
-            boost::apply_visitor(mapnik::value_extractor_visitor<std::string>(result),pos->second);
+            mapnik::util::apply_visitor(mapnik::value_extractor_visitor<std::string>(result),pos->second);
             if (result)
             {
                 QTableWidgetItem *keyItem = new QTableWidgetItem(QString(pos->first.c_str()));
@@ -69,4 +71,3 @@ Ui::LayerInfoDialog& layer_info_dialog::getUI()
 {
    return ui;
 }
-

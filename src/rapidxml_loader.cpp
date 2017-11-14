@@ -1,10 +1,8 @@
-
-
 /*****************************************************************************
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,50 +25,51 @@
 #endif
 
 // mapnik
-#include <mapnik/xml_loader.hpp>
-#include <boost/property_tree/detail/xml_parser_read_rapidxml.hpp>
-#include <mapnik/xml_node.hpp>
 #include <mapnik/config_error.hpp>
+#include <mapnik/util/fs.hpp>
+#include <mapnik/xml_loader.hpp>
+#include <mapnik/xml_node.hpp>
+#include <mapnik/util/trim.hpp>
+#include <mapnik/util/noncopyable.hpp>
+#include <mapnik/util/utf_conv_win.hpp>
 
-// boost
-#include <boost/utility.hpp>
-#include <boost/algorithm/string/trim.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/property_tree/detail/xml_parser_read_rapidxml.hpp>
+#pragma GCC diagnostic pop
 
 // stl
 #include <iostream>
 #include <fstream>
 
-using namespace std;
 namespace rapidxml = boost::property_tree::detail::rapidxml;
+
 namespace mapnik
 {
-class rapidxml_loader : boost::noncopyable
+class rapidxml_loader : util::noncopyable
 {
 public:
-    rapidxml_loader(const char *encoding = NULL) :
-        filename_()
-    {
+    rapidxml_loader() :
+        filename_() {}
 
-    }
+    ~rapidxml_loader() {}
 
-    ~rapidxml_loader()
+    void load(std::string const& filename, xml_node & node)
     {
-    }
-
-    void load(const std::string & filename, xml_node &node)
-    {
+        if (!mapnik::util::exists(filename))
+        {
+            throw config_error(std::string("Could not load map file: File does not exist"), 0, filename);
+        }
         filename_ = filename;
+#ifdef _WINDOWS
+        std::basic_ifstream<char> stream(mapnik::utf8_to_utf16(filename));
+#else
         std::basic_ifstream<char> stream(filename.c_str());
+#endif
         if (!stream)
         {
             throw config_error("Could not load map file", 0, filename);
         }
-//        TODO: stream.imbue(loc);
-        load(stream, node);
-    }
-
-    void load(std::basic_istream<char> &stream, xml_node &node)
-    {
         stream.unsetf(std::ios::skipws);
         std::vector<char> v(std::istreambuf_iterator<char>(stream.rdbuf()),
                             std::istreambuf_iterator<char>());
@@ -79,13 +78,20 @@ public:
             throw config_error("Could not load map file", 0, filename_);
         }
         v.push_back(0); // zero-terminate
+        load_array(v, node);
+    }
+
+    template <typename T>
+    void load_array(T && array, xml_node & node)
+    {
         try
         {
             // Parse using appropriate flags
-            const int f_tws = rapidxml::parse_normalize_whitespace
-                | rapidxml::parse_trim_whitespace;
+            // https://github.com/mapnik/mapnik/issues/1856
+            // const int f_tws = rapidxml::parse_normalize_whitespace;
+            const int f_tws = rapidxml::parse_trim_whitespace | rapidxml::parse_validate_closing_tags;
             rapidxml::xml_document<> doc;
-            doc.parse<f_tws>(&v.front());
+            doc.parse<f_tws>(&array.front());
 
             for (rapidxml::xml_node<char> *child = doc.first_node();
                  child; child = child->next_sibling())
@@ -93,37 +99,27 @@ public:
                 populate_tree(child, node);
             }
         }
-        catch (rapidxml::parse_error &e)
+        catch (rapidxml::parse_error const& e)
         {
             long line = static_cast<long>(
-                std::count(&v.front(), e.where<char>(), '\n') + 1);
+                std::count(&array.front(), e.where<char>(), '\n') + 1);
             throw config_error(e.what(), line, filename_);
         }
     }
 
-    void load_string(const std::string & buffer, xml_node &node, std::string const & base_path )
+    void load_string(std::string const& buffer, xml_node & node, std::string const & )
     {
-
-//        if (!base_path.empty())
-//        {
-//            boost::filesystem::path path(base_path);
-//            if (!boost::filesystem::exists(path)) {
-//                throw config_error(string("Could not locate base_path '") +
-//                                   base_path + "': file or directory does not exist");
-//            }
-//        }
-
-
-        load(buffer, node);
+        // Note: base_path ignored because its not relevant - only needed for xml2 to load entities (see libxml2_loader.cpp)
+        load_array(std::string(buffer), node);
     }
 private:
-    void populate_tree(rapidxml::xml_node<char> *cur_node, xml_node &node)
+    void populate_tree(rapidxml::xml_node<char> *cur_node, xml_node & node)
     {
         switch (cur_node->type())
         {
         case rapidxml::node_element:
         {
-            xml_node &new_node = node.add_child((char *)cur_node->name(), 0, false);
+            xml_node & new_node = node.add_child(cur_node->name(), 0, false);
             // Copy attributes
             for (rapidxml::xml_attribute<char> *attr = cur_node->first_attribute();
                  attr; attr = attr->next_attribute())
@@ -144,10 +140,14 @@ private:
         case rapidxml::node_data:
         case rapidxml::node_cdata:
         {
-            std::string trimmed(cur_node->value());
-            boost::trim(trimmed);
-            if (trimmed.empty()) break; //Don't add empty text nodes
-            node.add_child(trimmed, 0, true);
+            if (cur_node->value_size() > 0) // Don't add empty text nodes
+            {
+                // parsed text values should have leading and trailing
+                // whitespace trimmed.
+                std::string trimmed = cur_node->value();
+                mapnik::util::trim(trimmed);
+                node.add_child(trimmed.c_str(), 0, true);
+            }
         }
         break;
         default:
@@ -158,12 +158,12 @@ private:
     std::string filename_;
 };
 
-void read_xml(std::string const & filename, xml_node &node)
+void read_xml(std::string const& filename, xml_node & node)
 {
     rapidxml_loader loader;
     loader.load(filename, node);
 }
-void read_xml_string(std::string const & str, xml_node &node, std::string const & base_path)
+void read_xml_string(std::string const& str, xml_node & node, std::string const& base_path)
 {
     rapidxml_loader loader;
     loader.load_string(str, node, base_path);

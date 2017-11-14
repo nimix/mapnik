@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,40 +23,172 @@
 #ifndef MAPNIK_SQL_UTILS_HPP
 #define MAPNIK_SQL_UTILS_HPP
 
+// mapnik
+#include <mapnik/util/trim.hpp> // for trim
+
 // boost
-#include <boost/algorithm/string.hpp>
-#include <boost/scoped_array.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
+#include <boost/algorithm/string/replace.hpp>
+#pragma GCC diagnostic pop
+
+// stl
+#include <iosfwd>
+#include <regex>
+#include <string>
 
 namespace mapnik { namespace sql_utils {
 
-    inline std::string unquote_double(const std::string& sql)
+    struct quoted_string
+    {
+        std::string const* operator-> () const { return &str; }
+        std::string const& str;
+        char const quot;
+    };
+
+    inline quoted_string identifier(std::string const& str)
+    {
+        return { str, '"' };
+    }
+
+    inline quoted_string literal(std::string const& str)
+    {
+        return { str, '\'' };
+    }
+
+    inline std::ostream& operator << (std::ostream& os, quoted_string qs)
+    {
+        std::size_t pos = 0, next;
+
+        os.put(qs.quot);
+        while ((next = qs->find(qs.quot, pos)) != std::string::npos)
+        {
+            os.write(qs->data() + pos, next - pos + 1);
+            os.put(qs.quot);
+            pos = next + 1;
+        }
+        if ((next = qs->size()) > pos)
+        {
+            os.write(qs->data() + pos, next - pos);
+        }
+        return os.put(qs.quot);
+    }
+
+    // Does nothing if `str` doesn't start with `quot`.
+    // Otherwise erases the opening quote, collapses inner quote pairs,
+    // and erases everything from the closing quote to the end of the
+    // string. The closing quote is the first non-paired quote after the
+    // opening one. For a well-formed quoted string, it is also the last
+    // character, so nothing gets lost.
+    inline void unquote(char quot, std::string & str)
+    {
+        if (!str.empty() && str.front() == quot)
+        {
+            std::size_t di = 0;
+            for (std::size_t si = 1; si < str.size(); ++si)
+            {
+                char c = str[si];
+                if (c == quot && (++si >= str.size() || str[si] != quot))
+                    break;
+                str[di++] = c;
+            }
+            str.erase(di);
+        }
+    }
+
+    inline std::string unquote_copy(char quot, std::string const& str)
+    {
+        std::string tmp(str);
+        sql_utils::unquote(quot, tmp);
+        return tmp;
+    }
+
+    [[deprecated("flawed")]]
+    inline std::string unquote_double(std::string const& sql)
     {
         std::string table_name = sql;
-        boost::algorithm::trim_if(table_name,boost::algorithm::is_any_of("\""));
+        util::unquote_double(table_name);
         return table_name;
     }
 
-    inline std::string unquote(const std::string& sql)
+    [[deprecated("flawed")]]
+    inline std::string unquote(std::string const& sql)
     {
         std::string table_name = sql;
-        boost::algorithm::trim_if(table_name,boost::algorithm::is_any_of("\"\'"));
+        util::unquote(table_name);
         return table_name;
     }
 
-    inline void quote_attr(std::ostringstream& s, const std::string& field)
+    [[deprecated("flawed")]]
+    inline void quote_attr(std::ostringstream & s, std::string const& field)
     {
-        if (boost::algorithm::icontains(field,".")) {
-            std::vector<std::string> parts;
-            boost::split(parts, field, boost::is_any_of("."));
-            s << ",\"" << parts[0] << "\".\"" << parts[1] << "\"";
+        s << ",\"" << field << "\"";
+    }
+
+    const std::regex re_from{
+        "\\bFROM\\b"
+        , std::regex::icase
+    };
+
+    const std::regex re_table_name{
+        "\\s*(\\w+|(\"[^\"]*\")+)"      // $1 = schema
+        "(\\.(\\w+|(\"[^\"]*\")+))?"    // $4 = table
+        "\\s*"
+    };
+
+    inline bool table_from_sql(std::string const& sql,
+                               std::string & schema,
+                               std::string & table)
+    {
+        std::smatch m;
+        auto start = sql.begin();
+        auto end = sql.end();
+        auto flags = std::regex_constants::match_default;
+        auto found = std::regex_match(start, end, m, re_table_name);
+        auto extract_matched_parts = [&]()
+        {
+            if (m[4].matched)
+            {
+                table.assign(m[4].first, m[4].second);
+                schema.assign(m[1].first, m[1].second);
+            }
+            else
+            {
+                table.assign(m[1].first, m[1].second);
+                schema.clear();
+            }
+        };
+
+        if (found)
+        {
+            // input is not subquery, just "[schema.]table"
+            extract_matched_parts();
         }
         else
         {
-            s << ",\"" + field + "\"";
+            // search "FROM [schema.]table" in subquery
+            while (std::regex_search(start, end, m, re_from, flags))
+            {
+                start = m[0].second;
+                if (std::regex_search(start, end, m, re_table_name,
+                                      std::regex_constants::match_continuous))
+                {
+                    extract_matched_parts();
+                    found = true;
+                    start = m[0].second;
+                }
+                flags = std::regex_constants::match_prev_avail;
+            }
         }
+        if (found)
+        {
+            sql_utils::unquote('"', schema);
+            sql_utils::unquote('"', table);
+        }
+        return found;
     }
 
-    inline std::string table_from_sql(const std::string& sql)
+    inline std::string table_from_sql(std::string const& sql)
     {
         std::string table_name = sql;
         boost::algorithm::replace_all(table_name,"\n"," ");
@@ -70,7 +202,7 @@ namespace mapnik { namespace sql_utils {
             {
                 table_name=table_name.substr(idx);
             }
-            idx = table_name.find_first_of(" )");
+            idx = table_name.find_first_of(", )");
             if (idx != std::string::npos)
             {
                 table_name = table_name.substr(0,idx);
@@ -78,120 +210,6 @@ namespace mapnik { namespace sql_utils {
         }
         return table_name;
     }
-
-    inline std::string numeric2string(const char* buf)
-    {
-        int16_t ndigits = int2net(buf);
-        int16_t weight  = int2net(buf+2);
-        int16_t sign    = int2net(buf+4);
-        int16_t dscale  = int2net(buf+6);
-
-        boost::scoped_array<int16_t> digits(new int16_t[ndigits]);
-        for (int n=0; n < ndigits ;++n)
-        {
-            digits[n] = int2net(buf+8+n*2);
-        }
-
-        std::ostringstream ss;
-
-        if (sign == 0x4000) ss << "-";
-
-        int i = std::max(weight,int16_t(0));
-        int d = 0;
-
-        // Each numeric "digit" is actually a value between 0000 and 9999 stored in a 16 bit field.
-        // For example, the number 1234567809990001 is stored as four digits: [1234] [5678] [999] [1].
-        // Note that the last two digits show that the leading 0's are lost when the number is split.
-        // We must be careful to re-insert these 0's when building the string.
-
-        while ( i >= 0)
-        {
-            if (i <= weight && d < ndigits)
-            {
-                // All digits after the first must be padded to make the field 4 characters long
-                if (d != 0)
-                {
-#ifdef _WINDOWS
-                    int dig = digits[d];
-                    if (dig < 10)
-                    {
-                        ss << "000"; // 0000 - 0009
-                    }
-                    else if (dig < 100)
-                    {
-                        ss << "00";  // 0010 - 0099
-                    }
-                    else
-                    {
-                        ss << "0";   // 0100 - 0999;
-                    }
-#else
-                    switch(digits[d])
-                    {
-                    case 0 ... 9:
-                        ss << "000"; // 0000 - 0009
-                        break;
-                    case 10 ... 99:
-                        ss << "00";  // 0010 - 0099
-                        break;
-                    case 100 ... 999:
-                        ss << "0";   // 0100 - 0999
-                        break;
-                    }
-#endif
-                }
-                ss << digits[d++];
-            }
-            else
-            {
-                if (d == 0)
-                    ss <<  "0";
-                else
-                    ss <<  "0000";
-            }
-
-            i--;
-        }
-        if (dscale > 0)
-        {
-            ss << '.';
-            // dscale counts the number of decimal digits following the point, not the numeric digits
-            while (dscale > 0)
-            {
-                int value;
-                if (i <= weight && d < ndigits)
-                    value = digits[d++];
-                else
-                    value = 0;
-
-                // Output up to 4 decimal digits for this value
-                if (dscale > 0) {
-                    ss << (value / 1000);
-                    value %= 1000;
-                    dscale--;
-                }
-                if (dscale > 0) {
-                    ss << (value / 100);
-                    value %= 100;
-                    dscale--;
-                }
-                if (dscale > 0) {
-                    ss << (value / 10);
-                    value %= 10;
-                    dscale--;
-                }
-                if (dscale > 0) {
-                    ss << value;
-                    dscale--;
-                }
-
-                i--;
-            }
-        }
-        return ss.str();
-    }
-    }
-
-}
+}}
 
 #endif // MAPNIK_SQL_UTILS_HPP

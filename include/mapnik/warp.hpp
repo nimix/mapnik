@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,20 +24,34 @@
 #define MAPNIK_WARP_HPP
 
 // mapnik
-#include <mapnik/raster.hpp>
-#include <mapnik/proj_transform.hpp>
 #include <mapnik/image_scaling.hpp>
+#include <mapnik/config.hpp>
+#include <mapnik/geometry/box2d.hpp>
 
 namespace mapnik {
 
-void reproject_and_scale_raster(raster & target,
-                                raster const& source,
-                                proj_transform const& prj_trans,
-                                double offset_x, double offset_y,
-                                unsigned mesh_size,
-                                double filter_radius,
-                                scaling_method_e scaling_method);
+class raster;
+class proj_transform;
 
+MAPNIK_DECL void reproject_and_scale_raster(raster & target,
+                                            raster const& source,
+                                            proj_transform const& prj_trans,
+                                            double offset_x, double offset_y,
+                                            unsigned mesh_size,
+                                            scaling_method_e scaling_method,
+                                            boost::optional<double> const & nodata_value);
+
+MAPNIK_DECL void reproject_and_scale_raster(raster & target, raster const& source,
+                                            proj_transform const& prj_trans,
+                                            double offset_x, double offset_y,
+                                            unsigned mesh_size,
+                                            scaling_method_e scaling_method);
+
+template <typename T>
+MAPNIK_DECL void warp_image (T & target, T const& source, proj_transform const& prj_trans,
+                             box2d<double> const& target_ext, box2d<double> const& source_ext,
+                             double offset_x, double offset_y, unsigned mesh_size, scaling_method_e scaling_method, double filter_factor,
+                             boost::optional<double> const & nodata_value);
 }
 
 #endif // MAPNIK_WARP_HPP

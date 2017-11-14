@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,22 +20,26 @@
  *
  *****************************************************************************/
 
+#if defined(GRID_RENDERER)
+
 // boost
-#include <boost/foreach.hpp>
+
 
 // mapnik
+#include <mapnik/feature.hpp>
 #include <mapnik/grid/grid_rasterizer.hpp>
 #include <mapnik/grid/grid_renderer.hpp>
-#include <mapnik/grid/grid_pixfmt.hpp>
-#include <mapnik/grid/grid_pixel.hpp>
+#include <mapnik/grid/grid_renderer_base.hpp>
 #include <mapnik/grid/grid.hpp>
-#include <mapnik/polygon_symbolizer.hpp>
 #include <mapnik/vertex_converters.hpp>
+#include <mapnik/renderer_common/process_polygon_symbolizer.hpp>
 
-// agg
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore_agg.hpp>
 #include "agg_rasterizer_scanline_aa.h"
 #include "agg_renderer_scanline.h"
 #include "agg_scanline_bin.h"
+#pragma GCC diagnostic pop
 
 // stl
 #include <string>
@@ -48,48 +52,32 @@ void grid_renderer<T>::process(polygon_symbolizer const& sym,
                                mapnik::feature_impl & feature,
                                proj_transform const& prj_trans)
 {
+    using renderer_type = agg::renderer_scanline_bin_solid<grid_renderer_base_type>;
+    using pixfmt_type = typename grid_renderer_base_type::pixfmt_type;
+    using color_type = typename grid_renderer_base_type::pixfmt_type::color_type;
+    using vertex_converter_type = vertex_converter<clip_poly_tag,transform_tag,affine_transform_tag,simplify_tag,smooth_tag>;
+
     ras_ptr->reset();
 
-    box2d<double> inflated_extent = query_extent_ * 1.0;
+    grid_rendering_buffer buf(pixmap_.raw_data(), common_.width_, common_.height_, common_.width_);
 
-    agg::trans_affine tr;
-    evaluate_transform(tr, feature, sym.get_transform());
+    render_polygon_symbolizer<vertex_converter_type>(
+      sym, feature, prj_trans, common_, common_.query_extent_, *ras_ptr,
+      [&](color const &, double) {
+        pixfmt_type pixf(buf);
 
-    typedef boost::mpl::vector<clip_poly_tag,transform_tag,affine_transform_tag,smooth_tag> conv_types;
-    vertex_converter<box2d<double>, grid_rasterizer, polygon_symbolizer,
-                     CoordTransform, proj_transform, agg::trans_affine, conv_types>
-        converter(inflated_extent,*ras_ptr,sym,t_,prj_trans,tr,scale_factor_);
+        grid_renderer_base_type renb(pixf);
+        renderer_type ren(renb);
 
-    if (sym.clip()) converter.set<clip_poly_tag>(); //optional clip (default: true)
-    converter.set<transform_tag>(); //always transform
-    converter.set<affine_transform_tag>();
-    if (sym.smooth() > 0.0) converter.set<smooth_tag>(); // optional smooth converter
+        // render id
+        ren.color(color_type(feature.id()));
+        agg::scanline_bin sl;
+        ras_ptr->filling_rule(agg::fill_even_odd);
+        agg::render_scanlines(*ras_ptr, sl, ren);
 
-
-    BOOST_FOREACH( geometry_type & geom, feature.paths())
-    {
-        if (geom.size() > 2)
-        {
-            converter.apply(geom);
-        }
-    }
-
-    typedef agg::renderer_base<mapnik::pixfmt_gray32> ren_base;
-    typedef agg::renderer_scanline_bin_solid<ren_base> renderer;
-
-    grid_rendering_buffer buf(pixmap_.raw_data(), width_, height_, width_);
-    mapnik::pixfmt_gray32 pixf(buf);
-
-    ren_base renb(pixf);
-    renderer ren(renb);
-
-    // render id
-    ren.color(mapnik::gray32(feature.id()));
-    agg::scanline_bin sl;
-    agg::render_scanlines(*ras_ptr, sl, ren);
-
-    // add feature properties to grid cache
-    pixmap_.add_feature(feature);
+        // add feature properties to grid cache
+        pixmap_.add_feature(feature);
+      });
 }
 
 
@@ -99,3 +87,4 @@ template void grid_renderer<grid>::process(polygon_symbolizer const&,
 
 }
 
+#endif

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,17 +25,17 @@
 
 // stl
 #include <string.h>
+#include <memory>
 
 // mapnik
 #include <mapnik/datasource.hpp>
 #include <mapnik/params.hpp>
-#include <mapnik/sql_utils.hpp>
 #include <mapnik/timer.hpp>
 
-// boost
-#include <boost/shared_ptr.hpp>
-#include <boost/make_shared.hpp>
+#pragma GCC diagnostic push
+#include <mapnik/warning_ignore.hpp>
 #include <boost/algorithm/string.hpp>
+#pragma GCC diagnostic pop
 
 // sqlite
 extern "C" {
@@ -51,7 +51,7 @@ class sqlite_connection
 {
 public:
 
-    sqlite_connection (const std::string& file)
+    sqlite_connection (std::string const& file)
         : db_(0),
           file_(file)
     {
@@ -59,11 +59,15 @@ public:
         int mode = SQLITE_OPEN_READWRITE;
 #if SQLITE_VERSION_NUMBER >= 3006018
         // shared cache flag not available until >= 3.6.18
-        mode |= SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_SHAREDCACHE;
+        // Don't use shared cache in SQLite prior to 3.7.15.
+        // https://github.com/mapnik/mapnik/issues/2483
+        if (sqlite3_libversion_number() >= 3007015)
+        {
+            mode |= SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_SHAREDCACHE;
+        }
 #endif
         const int rc = sqlite3_open_v2 (file_.c_str(), &db_, mode, 0);
 #else
-#warning "Mapnik's sqlite plugin is compiling against a version of sqlite older than 3.5.x which may make rendering slow..."
         const int rc = sqlite3_open (file_.c_str(), &db_);
 #endif
         if (rc != SQLITE_OK)
@@ -77,14 +81,13 @@ public:
         sqlite3_busy_timeout(db_,5000);
     }
 
-    sqlite_connection (const std::string& file, int flags)
+    sqlite_connection (std::string const& file, int flags)
         : db_(0),
           file_(file)
     {
 #if SQLITE_VERSION_NUMBER >= 3005000
         const int rc = sqlite3_open_v2 (file_.c_str(), &db_, flags, 0);
 #else
-#warning "Mapnik's sqlite plugin is compiling against a version of sqlite older than 3.5.x which may make rendering slow..."
         const int rc = sqlite3_open (file_.c_str(), &db_);
 #endif
         if (rc != SQLITE_OK)
@@ -104,7 +107,7 @@ public:
         }
     }
 
-    void throw_sqlite_error(const std::string& sql)
+    void throw_sqlite_error(std::string const& sql)
     {
         std::ostringstream s;
         s << "Sqlite Plugin: ";
@@ -119,7 +122,7 @@ public:
         throw mapnik::datasource_exception (s.str());
     }
 
-    boost::shared_ptr<sqlite_resultset> execute_query(const std::string& sql)
+    std::shared_ptr<sqlite_resultset> execute_query(std::string const& sql)
     {
 #ifdef MAPNIK_STATS
         mapnik::progress_timer __stats__(std::clog, std::string("sqlite_resultset::execute_query ") + sql);
@@ -132,10 +135,10 @@ public:
             throw_sqlite_error(sql);
         }
 
-        return boost::make_shared<sqlite_resultset>(stmt);
+        return std::make_shared<sqlite_resultset>(stmt);
     }
 
-    void execute(const std::string& sql)
+    void execute(std::string const& sql)
     {
 #ifdef MAPNIK_STATS
         mapnik::progress_timer __stats__(std::clog, std::string("sqlite_resultset::execute ") + sql);
@@ -148,7 +151,7 @@ public:
         }
     }
 
-    int execute_with_code(const std::string& sql)
+    int execute_with_code(std::string const& sql)
     {
 #ifdef MAPNIK_STATS
         mapnik::progress_timer __stats__(std::clog, std::string("sqlite_resultset::execute_with_code ") + sql);
@@ -163,6 +166,12 @@ public:
         return db_;
     }
 
+    bool load_extension(std::string const& ext_path)
+    {
+        sqlite3_enable_load_extension(db_, 1);
+        int result = sqlite3_load_extension(db_, ext_path.c_str(), 0 , 0);
+        return (result == SQLITE_OK)? true : false;
+    }
 
 private:
 

@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,37 +24,18 @@
 #define MAPNIK_GEOMETRY_TO_WKT_HPP
 
 // mapnik
-#include <mapnik/global.hpp>
 #include <mapnik/geometry.hpp>
-#include <mapnik/util/vertex_iterator.hpp>
-#include <mapnik/util/geometry_wkt_generator.hpp>
-
-// boost
-#include <boost/spirit/include/karma.hpp>
+// stl
+#include <string>
 
 namespace mapnik { namespace util {
 
-namespace karma = boost::spirit::karma;
+bool to_wkt(std::string & wkt,  mapnik::geometry::geometry<double> const& geom);
 
-bool to_wkt(std::string & wkt, mapnik::geometry_type const& geom)
-{
-    typedef std::back_insert_iterator<std::string> sink_type;
-    sink_type sink(wkt);
-    wkt_generator<sink_type> generator(true);
-    bool result = karma::generate(sink, generator, geom);
-    return result;
-}
-
-bool to_wkt(std::string & wkt, mapnik::geometry_container const& geom)
-{
-    typedef std::back_insert_iterator<std::string> sink_type;
-    sink_type sink(wkt);
-    wkt_multi_generator<sink_type> generator;
-    bool result = karma::generate(sink, generator, geom);
-    return result;
-}
+bool to_wkt(std::string & wkt,  mapnik::geometry::geometry<std::int64_t> const& geom);
 
 }}
+
 
 
 #endif // MAPNIK_GEOMETRY_TO_WKT_HPP

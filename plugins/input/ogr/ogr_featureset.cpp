@@ -2,7 +2,7 @@
  *
  * This file is part of Mapnik (c++ mapping toolkit)
  *
- * Copyright (C) 2011 Artem Pavlenko
+ * Copyright (C) 2017 Artem Pavlenko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,24 +22,23 @@
 
 // mapnik
 #include <mapnik/global.hpp>
+#include <mapnik/value/types.hpp>
 #include <mapnik/debug.hpp>
-#include <mapnik/datasource.hpp>
-#include <mapnik/box2d.hpp>
-#include <mapnik/geometry.hpp>
+#include <mapnik/geometry/box2d.hpp>
 #include <mapnik/feature.hpp>
 #include <mapnik/feature_layer_desc.hpp>
 #include <mapnik/wkb.hpp>
 #include <mapnik/unicode.hpp>
+#include <mapnik/value/types.hpp>
 #include <mapnik/feature_factory.hpp>
+#include <mapnik/geometry/correct.hpp>
 
 // ogr
 #include "ogr_featureset.hpp"
 #include "ogr_converter.hpp"
-#include "ogr_feature_ptr.hpp"
 
 using mapnik::query;
 using mapnik::box2d;
-using mapnik::Feature;
 using mapnik::feature_ptr;
 using mapnik::geometry_utils;
 using mapnik::transcoder;
@@ -69,7 +68,7 @@ ogr_featureset::ogr_featureset(mapnik::context_ptr const& ctx,
       layer_(layer),
       layerdef_(layer.GetLayerDefn()),
       tr_(new transcoder(encoding)),
-      fidcolumn_(layer_.GetFIDColumn()),
+      fidcolumn_(layer_.GetFIDColumn()), // TODO - unused
       count_(0)
 {
     layer_.SetSpatialFilterRect (extent.minx(),
@@ -84,23 +83,34 @@ ogr_featureset::~ogr_featureset()
 
 feature_ptr ogr_featureset::next()
 {
-    ogr_feature_ptr feat (layer_.GetNextFeature());
-
-    if ((*feat) != NULL)
+    if (count_ == 0)
+    {
+        // Reset the layer reading on the first feature read
+        // this is a hack, but needed due to https://github.com/mapnik/mapnik/issues/2048
+        // Proper solution is to avoid storing layer state in featureset
+        layer_.ResetReading();
+    }
+    OGRFeature *poFeature;
+    while ((poFeature = layer_.GetNextFeature()) != nullptr)
     {
         // ogr feature ids start at 0, so add one to stay
         // consistent with other mapnik datasources that start at 1
-        const int feature_id = ((*feat)->GetFID() + 1);
+        mapnik::value_integer feature_id = (poFeature->GetFID() + 1);
         feature_ptr feature(feature_factory::create(ctx_,feature_id));
 
-        OGRGeometry* geom = (*feat)->GetGeometryRef();
+        OGRGeometry* geom = poFeature->GetGeometryRef();
         if (geom && ! geom->IsEmpty())
         {
-            ogr_converter::convert_geometry(geom, feature);
+            auto geom_corrected = ogr_converter::convert_geometry(geom);
+            mapnik::geometry::correct(geom_corrected);
+            feature->set_geometry(std::move(geom_corrected));
         }
         else
         {
-            MAPNIK_LOG_DEBUG(ogr) << "ogr_featureset: Feature with null geometry=" << (*feat)->GetFID();
+            MAPNIK_LOG_DEBUG(ogr) << "ogr_featureset: Feature with null geometry="
+                << poFeature->GetFID();
+            OGRFeature::DestroyFeature( poFeature );
+            continue;
         }
 
         ++count_;
@@ -116,25 +126,34 @@ feature_ptr ogr_featureset::next()
             {
             case OFTInteger:
             {
-                feature->put( fld_name, (*feat)->GetFieldAsInteger(i));
+                feature->put<mapnik::value_integer>( fld_name, poFeature->GetFieldAsInteger(i));
                 break;
             }
+#if GDAL_VERSION_MAJOR >= 2
+            case OFTInteger64:
+            {
+                feature->put<mapnik::value_integer>( fld_name, poFeature->GetFieldAsInteger64(i));
+                break;
+            }
+#endif
 
             case OFTReal:
             {
-                feature->put( fld_name, (*feat)->GetFieldAsDouble(i));
+                feature->put( fld_name, poFeature->GetFieldAsDouble(i));
                 break;
             }
 
             case OFTString:
             case OFTWideString:     // deprecated !
             {
-                UnicodeString ustr = tr_->transcode((*feat)->GetFieldAsString(i));
-                feature->put( fld_name, ustr);
+                feature->put( fld_name, tr_->transcode(poFeature->GetFieldAsString(i)));
                 break;
             }
 
             case OFTIntegerList:
+#if GDAL_VERSION_MAJOR >= 2
+            case OFTInteger64List:
+#endif
             case OFTRealList:
             case OFTStringList:
             case OFTWideStringList: // deprecated !
@@ -165,6 +184,7 @@ feature_ptr ogr_featureset::next()
             }
             }
         }
+        OGRFeature::DestroyFeature( poFeature );
         return feature;
     }
 
