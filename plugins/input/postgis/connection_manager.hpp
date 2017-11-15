@@ -134,7 +134,7 @@ public:
         else
         {
 #ifdef MAPNIK_THREADSAFE
-            boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock(pools_access);
+            boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock(lock);
 #endif
             return pools_.insert(
                 std::make_pair(creator.id(),
